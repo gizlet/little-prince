@@ -61,7 +61,7 @@ Left alone on the title for 12 seconds, it plays by itself (autoplay) and moves 
 | `LITTLEPRINCE_STATS=0` | Hide the stats panel |
 | `LITTLEPRINCE_HERO=Name` | Load `assets/hero/Name.glb` instead of `Rogue_Hooded` (any KayKit Adventurers 1.0 character) |
 | `LITTLEPRINCE_PROFILE=1` | Print the frame time per stage (waiting for the GPU after each) and the triangles drawn, every 3 seconds; `2` prints only the frame time |
-| `LITTLEPRINCE_SKIP=hero,world,heroink,skin` | Leave parts out, for measuring their cost |
+| `LITTLEPRINCE_SKIP=hero,heroink,skin,world,grass,props,flowers,backdrop,sky,alpha,glass,glow,bloom` | Leave parts out, for measuring their cost |
 | `LITTLEPRINCE_FPS=60` | Frame rate cap; `0` leaves the pace to the display |
 | `LITTLEPRINCE_CAPTURE=FILE.png` | Render one frame to a PNG and exit; `LITTLEPRINCE_SCENE` is `title`, `b612`, `lamp`, `desert`, `fly`, `model` or `icon`, and `LITTLEPRINCE_AT` the seconds of autoplay before it |
 
@@ -85,13 +85,15 @@ Stop the launcher first (`systemctl stop gizlet-session`) so the game gets the s
 
 ### Performance on the R36S
 
-On a genuine R36S (RK3326, Mali-G31 through Panfrost, Mesa 25.0) B612 runs at about 50 fps at the default (mid) effects level, with about 45,000 triangles in about 50 draw calls a frame and about 140 MB of memory. The main thread spends about 14 ms of CPU time per frame, so the GPU now sets the pace: its fragment stage is busy about 85% of the time. The high effects level (bloom, paper, the hero's outline) runs at about 32 fps.
+On a genuine R36S (RK3326, Mali-G31 through Panfrost, Mesa 25.0) B612 runs at about 50 fps at the default (mid) effects level, with about 45,000 triangles in about 50 draw calls a frame and about 140 MB of memory. The main thread spends about 14 ms of CPU time per frame, so the GPU sets the pace: its fragment stage is busy about 85% of the time. The high effects level (bloom, paper, the hero's outline) runs at about 36 fps.
+
+On this GPU every triangle costs fragment time, however few pixels it covers: drawing the hero at a quarter of its size saves only about a third of its cost, and drawing half its triangles saves half. So the hero's outline uses a reduced copy of its mesh (about 1,800 triangles instead of 4,000, merged on a grid over the same skinned vertices), and planet cells more than 3 units from the camera carry every other blade of grass. Swapping the hero's shader for a flat one, mipmapping its texture or discarding depth buffers at the end of each pass made no measurable difference.
 
 The biggest single win was giving raylib's render batch 48 buffers in rotation instead of one (`rlLoadRenderBatch`, set with `LITTLEPRINCE_BATCH`). With one buffer, every batch flush rewrites a vertex buffer the GPU is still reading, and Panfrost makes the CPU wait for the GPU each time: about 25 ms a frame went to those waits, and the game ran at 22 fps. The hero's skinned mesh is double-buffered for the same reason.
 
 Other changes that helped: batching small character parts into a few draw calls, indexed meshes, cheaper small parts and far-away scenery, lighting scenery per vertex without rim light, splitting each planet into 80 cells that hold their ground, scenery, flowers and grass in one mesh each (in full nearby, coarser farther off, ground only beyond), drawn nearest first and only when in front of the camera and above the horizon, skinning the hero on the CPU, drawing straight to the screen below the high effects level, drawing opaque things without blending, the sky after the solids, and a HUD redrawn four times a second and blitted only where it holds something.
 
-`LITTLEPRINCE_PROFILE=2` prints the frame time, the CPU time before the frame is handed over (`cpu`) and the main thread's CPU time (`thread-cpu`); `1` also splits it into stages, waiting for the GPU after each; `3` splits it without waiting. `LITTLEPRINCE_SKIP=hero,world,heroink,skin` leaves parts out to measure their cost.
+`LITTLEPRINCE_PROFILE=2` prints the frame time, the CPU time before the frame is handed over (`cpu`) and the main thread's CPU time (`thread-cpu`); `1` also splits it into stages, waiting for the GPU after each; `3` splits it without waiting. `LITTLEPRINCE_SKIP` leaves parts out to measure their cost; reading the GPU busy time from `/proc/PID/fdinfo` (with `/sys/bus/platform/drivers/panfrost/*/profiling` set to 1) shows what each part costs the GPU.
 
 The sky backdrop and the stars are drawn 26–30 units from the camera, well inside the far plane: on the handheld's depth buffer things near the far plane can fail the depth test and the sky flickers black.
 

@@ -111,6 +111,9 @@ struct Ids {
     cheer: usize,
 }
 
+/// The outline's vertex merging grid: this many cells from feet to head.
+const INK_CELLS: f32 = 24.0;
+
 pub struct Hero {
     pub name: String,
     model: Model,
@@ -119,6 +122,9 @@ pub struct Hero {
     /// Two copies, written in turn, so a frame never rewrites the one the
     /// GPU may still be drawing from the frame before.
     meshes: [Mesh; 2],
+    /// The same vertices with fewer triangles, for the ink outline: on the
+    /// handheld's GPU every triangle costs fragment time, however small.
+    ink: [Mesh; 2],
     buf: usize,
     tex: Texture2D,
     bind_inv: Vec<M>,
@@ -216,7 +222,9 @@ impl Hero {
             let (foot, top) = ys.fold((f32::MAX, f32::MIN), |(a, b), y| (a.min(y), b.max(y)));
             let tex = tex?;
             ffi::SetTextureFilter(tex, ffi::TextureFilter::TEXTURE_FILTER_BILINEAR as i32);
+            let ink_idx = crate::mesh::cluster(&pos, &idx, (top - foot) / INK_CELLS);
             let meshes = [0, 1].map(|_| crate::mesh::upload_skinned(&pos, &nrm, &uv, &ids, &w, &idx));
+            let ink = [0, 1].map(|_| crate::mesh::upload_skinned(&pos, &nrm, &uv, &ids, &w, &ink_idx));
             let bone_ids = ids;
             let bind_inv = (0..bones).map(|i| srt_inv(&*model.skeleton.bindPose.add(i))).collect();
             let names: Vec<String> = (0..count as usize).map(|i| cname(&(*anims.add(i)).name)).collect();
@@ -236,6 +244,7 @@ impl Hero {
                 anims,
                 count: count as usize,
                 meshes,
+                ink,
                 buf: 0,
                 tex,
                 bind_inv,
@@ -370,10 +379,12 @@ impl Hero {
         }
         unsafe {
             self.buf ^= 1;
-            let ids = std::slice::from_raw_parts(self.meshes[self.buf].vboId, 3);
             let bytes = (self.out_pos.len() * 4) as i32;
-            ffi::rlUpdateVertexBuffer(ids[0], self.out_pos.as_ptr() as _, bytes, 0);
-            ffi::rlUpdateVertexBuffer(ids[2], self.out_nrm.as_ptr() as _, bytes, 0);
+            for m in [self.meshes[self.buf], self.ink[self.buf]] {
+                let ids = std::slice::from_raw_parts(m.vboId, 3);
+                ffi::rlUpdateVertexBuffer(ids[0], self.out_pos.as_ptr() as _, bytes, 0);
+                ffi::rlUpdateVertexBuffer(ids[2], self.out_nrm.as_ptr() as _, bytes, 0);
+            }
         }
     }
 
@@ -381,7 +392,7 @@ impl Hero {
     pub fn draw(&self, gl: &Gl, f: &Frame, h: f32) {
         let k = h / self.height.max(1e-3);
         let m: Matrix = basis(f.x * k, f.y * k, f.z * k, f.o - f.y * (self.foot * k));
-        gl.draw_skinned(self.meshes[self.buf], m, self.tex);
+        gl.draw_skinned(self.meshes[self.buf], self.ink[self.buf], m, self.tex);
     }
 
     /// The top of the head, for the birds' strings.

@@ -811,7 +811,7 @@ impl Gl {
     }
 
     /// Draws the hero's mesh (already skinned on the CPU), then its ink outline.
-    pub fn draw_skinned(&self, mesh: Mesh, m: Matrix, tex: Texture2D) {
+    pub fn draw_skinned(&self, mesh: Mesh, ink: Mesh, m: Matrix, tex: Texture2D) {
         self.tris.set(self.tris.get() + mesh.triangleCount as u64);
         unsafe {
             (*self.skin_mat.maps).texture = tex;
@@ -824,9 +824,9 @@ impl Gl {
                 self.outline.f("radial", 0.0);
                 ffi::rlSetCullFace(ffi::rlCullMode::RL_CULL_FACE_FRONT as i32);
                 crate::prof::count_draw();
-            ffi::DrawMesh(mesh, self.outline_mat, m);
+                ffi::DrawMesh(ink, self.outline_mat, m);
                 ffi::rlSetCullFace(ffi::rlCullMode::RL_CULL_FACE_BACK as i32);
-                self.tris.set(self.tris.get() + mesh.triangleCount as u64);
+                self.tris.set(self.tris.get() + ink.triangleCount as u64);
             }
         }
     }
@@ -957,7 +957,7 @@ impl Gl {
         };
         let origin = ffi::Vector2 { x: 0.0, y: 0.0 };
         let white = rgb(0xFFFFFF);
-        let bloom = post.level >= 2;
+        let bloom = post.level >= 2 && !crate::prof::skip("bloom");
         let lens = post.level >= 1;
         unsafe {
             if bloom {

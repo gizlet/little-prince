@@ -30,8 +30,10 @@ pub enum Kind {
 
 pub const KINDS: [Kind; 3] = [Kind::B612, Kind::Lamp, Kind::Desert];
 const FOX_TRUST: usize = 5;
-/// Up to this far from the camera a cell has grass, flowers and full scenery;
-/// up to `MID` coarser scenery; beyond, only the ground.
+/// Up to `CLOSE` from the camera a cell has all its grass, flowers and full
+/// scenery; up to `NEAR` half the grass; up to `MID` only coarser scenery;
+/// beyond, only the ground.
+const CLOSE: f32 = 3.0;
 const NEAR: f32 = 6.0;
 const MID: f32 = 16.0;
 /// How far the stars, sun and moon are drawn from the camera.
@@ -1076,7 +1078,7 @@ impl World {
             let mut list: Vec<(f32, Mesh, &'static str)> = Vec::new();
             for c in &self.tiles {
                 if let Some(d) = self.visible(c, cam, fwd, 4.0, 60.0) {
-                    let (m, name) = if d < NEAR { (c.near, "near") } else if d < MID { (c.mid, "mid") } else { (c.far, "far") };
+                    let (m, name) = if d < CLOSE { (c.close, "close") } else if d < NEAR { (c.near, "near") } else if d < MID { (c.mid, "mid") } else { (c.far, "far") };
                     list.push((d, m, name));
                 }
             }

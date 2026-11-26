@@ -163,6 +163,33 @@ pub fn upload_skinned(pos: &[f32], nrm: &[f32], uv: &[f32], ids: &[u8], w: &[f32
     }
 }
 
+/// Fewer triangles for the same vertices: vertices in the same `cell`-sized
+/// box are merged into the first of them, and triangles that collapse are
+/// dropped. Returns the new index list; the vertex buffers stay as they are.
+pub fn cluster(pos: &[f32], idx: &[u16], cell: f32) -> Vec<u16> {
+    let mut first: std::collections::HashMap<[i32; 3], u16> = std::collections::HashMap::new();
+    let rep: Vec<u16> = (0..pos.len() / 3)
+        .map(|v| {
+            let q = |x: f32| (x / cell).floor() as i32;
+            *first.entry([q(pos[v * 3]), q(pos[v * 3 + 1]), q(pos[v * 3 + 2])]).or_insert(v as u16)
+        })
+        .collect();
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for t in idx.chunks(3) {
+        let (a, b, c) = (rep[t[0] as usize], rep[t[1] as usize], rep[t[2] as usize]);
+        if a == b || b == c || a == c {
+            continue;
+        }
+        // The same triangle twice (in any rotation) is drawn once.
+        let k = if a < b && a < c { [a, b, c] } else if b < c { [b, c, a] } else { [c, a, b] };
+        if seen.insert(k) {
+            out.extend_from_slice(&[a, b, c]);
+        }
+    }
+    out
+}
+
 /// The 20 faces of an icosahedron, subdivided `n` times onto the unit sphere.
 pub fn icosphere(n: u32) -> Vec<[V3; 3]> {
     let t = (1.0 + 5f32.sqrt()) / 2.0;
@@ -381,14 +408,18 @@ pub fn grass(rng: &mut Rng, count: usize, height: &dyn Fn(V3) -> f32, keep: &dyn
     b
 }
 
-/// One of 80 cells of a planet, holding everything static in it at three
-/// levels of detail, each a single mesh and so a single draw call: `near`
-/// has the ground, the full scenery, flowers and grass; `mid` the ground and
-/// the coarser scenery; `far` the ground alone.
+/// One of 80 cells of a planet, holding everything static in it at four
+/// levels of detail, each a single mesh and so a single draw call: `close`
+/// has the ground, the full scenery, flowers and all the grass; `near` the
+/// same with every other blade of grass; `mid` the ground and the coarser
+/// scenery; `far` the ground alone. On the handheld's GPU every triangle
+/// costs fragment time however small it is on screen, so distant cells
+/// carry fewer.
 pub struct Tile {
     pub dir: V3,
     /// The angle from `dir` to the cell's farthest vertex.
     pub ang: f32,
+    pub close: Mesh,
     pub near: Mesh,
     pub mid: Mesh,
     pub far: Mesh,
@@ -413,6 +444,18 @@ impl Builder {
             }
         }
         parts
+    }
+
+    /// Every other blade of grass (each blade is two triangles, one per side).
+    fn thinned(&self) -> Builder {
+        let mut b = Builder::default();
+        for t in (0..self.pos.len() / 9).filter(|t| t / 2 % 2 == 0) {
+            b.pos.extend(&self.pos[t * 9..t * 9 + 9]);
+            b.nrm.extend(&self.nrm[t * 9..t * 9 + 9]);
+            b.uv.extend(&self.uv[t * 6..t * 6 + 6]);
+            b.col.extend(&self.col[t * 12..t * 12 + 12]);
+        }
+        b
     }
 
     fn append(&mut self, o: &Builder) {
@@ -442,13 +485,23 @@ pub fn tiles(ground: Builder, props: Builder, props_lo: Builder, decor: Builder,
             continue;
         }
         let mut near = g.clone();
-        near.append(&p);
-        near.append(&d);
-        near.append(&s);
-        let ang = near.pos.chunks(3).map(|q| v3(q[0], q[1], q[2]).norm().dot(dir).clamp(-1.0, 1.0).acos()).fold(0.0, f32::max);
+        // `LITTLEPRINCE_SKIP` can leave a layer out, for measuring its cost.
+        for (part, name) in [(&p, "props"), (&d, "flowers")] {
+            if !crate::prof::skip(name) {
+                near.append(part);
+            }
+        }
+        let mut close = near.clone();
+        if !crate::prof::skip("grass") {
+            close.append(&s);
+            near.append(&s.thinned());
+        }
+        let ang = close.pos.chunks(3).map(|q| v3(q[0], q[1], q[2]).norm().dot(dir).clamp(-1.0, 1.0).acos()).fold(0.0, f32::max);
         let mut mid = g.clone();
-        mid.append(&l);
-        out.push(Tile { dir, ang, near: near.indexed().upload(), mid: mid.indexed().upload(), far: g.indexed().upload() });
+        if !crate::prof::skip("props") {
+            mid.append(&l);
+        }
+        out.push(Tile { dir, ang, close: close.indexed().upload(), near: near.indexed().upload(), mid: mid.indexed().upload(), far: g.indexed().upload() });
     }
     out
 }

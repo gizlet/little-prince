@@ -605,7 +605,9 @@ impl App {
         crate::prof::mark("grass");
         // The sky gradient last, on a quad at the far end of the view: only the
         // pixels the planet leaves uncovered are filled, not the whole screen.
-        draw_backdrop(self.cam.pos + shake, fwd, right, up, 50.0 + warp * 14.0, top, bottom);
+        if !crate::prof::skip("backdrop") {
+            draw_backdrop(self.cam.pos + shake, fwd, right, up, 50.0 + warp * 14.0, top, bottom);
+        }
         if opaque {
             unsafe {
                 ffi::rlDrawRenderBatchActive();
@@ -615,13 +617,18 @@ impl App {
         crate::prof::mark("backdrop");
         // Stars, sun, moon and clouds after the solids, so the depth test
         // rejects whatever the planet hides.
-        gl::additive(|| w.draw_sky(g, &spr, self.cam.pos, t, warp, &sky));
+        if !crate::prof::skip("sky") {
+            gl::additive(|| w.draw_sky(g, &spr, self.cam.pos, t, warp, &sky));
+        }
         crate::prof::mark("sky");
         if self.hero.is_none() {
             self.player.draw_scarf(&light, t, sky.ink);
         }
         self.draw_strings(sky.ink);
         gl::alpha(|| {
+            if crate::prof::skip("alpha") {
+                return;
+            }
             Sprites::begin(g.sprite);
             self.player.draw_shadow();
             Sprites::end();
@@ -629,8 +636,13 @@ impl App {
             w.draw_alpha(g, t, self.cam.pos);
         });
         crate::prof::mark("scarf+dust");
-        w.draw_glass(g, &self.kit);
+        if !crate::prof::skip("glass") {
+            w.draw_glass(g, &self.kit);
+        }
         gl::additive(|| {
+            if crate::prof::skip("glow") {
+                return;
+            }
             w.draw_glow(g, &spr, t);
             Sprites::begin(g.sprite);
             self.player.draw_glow(&spr, t);
