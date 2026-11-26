@@ -50,7 +50,7 @@ jobs:
     permissions:
       contents: read
     concurrency:
-      group: ci-${{ needs.start.outputs.number || github.ref }}
+      group: ci-${{ needs.start.outputs.number || github.run_id }}
       cancel-in-progress: ${{ needs.start.outputs.number != '' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
@@ -58,24 +58,6 @@ jobs:
           ref: ${{ needs.start.outputs.head_sha || github.sha }}
           lfs: true
           persist-credentials: false
-      - name: Verify package version
-        env:
-          RELEASE_TAG: ${{ github.ref_type == 'tag' && needs.start.result == 'skipped' && github.ref_name || '' }}
-        run: |
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-          import sys
-          import tomllib
-
-          version = tomllib.loads(Path("gizlet.toml").read_text())["version"]
-          cargo_version = tomllib.loads(Path("Cargo.toml").read_text())["package"]["version"]
-          if version != cargo_version:
-              sys.exit(f"gizlet.toml version {version} does not match Cargo.toml version {cargo_version}")
-          tag = os.environ["RELEASE_TAG"]
-          if tag and tag != f"v{version}":
-              sys.exit(f"Expected release tag v{version}, got {tag}")
-          PY
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           repository: gizlet/os
@@ -117,9 +99,9 @@ jobs:
 
   release:
     needs: package
-    if: github.ref_type == 'tag' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.pull_request_number == ''))
-    concurrency:
-      group: store-release-${{ github.ref }}
+    if: >-
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag'))
+      || (github.event_name == 'workflow_dispatch' && github.ref_type == 'tag' && inputs.pull_request_number == '')
     permissions:
       contents: write
       id-token: write

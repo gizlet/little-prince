@@ -22,7 +22,8 @@ export CC_aarch64_unknown_linux_gnu="$root/scripts/zig-cc"
 export BINDGEN_EXTRA_CLANG_ARGS_aarch64_unknown_linux_gnu="-isystem $inc/aarch64-linux-gnu -isystem $inc/generic-glibc -isystem $inc/any-linux-any"
 
 cd "$root"
-cargo build --release --locked --target "$target" --features gizlet-os
+version=$(python3 -c 'import tomllib; print(tomllib.load(open("gizlet.toml", "rb"))["version"])')
+GIZLET_APP_VERSION="$version" cargo build --release --locked --target "$target" --features gizlet-os
 
 rm -rf "$out"
 mkdir -p "$out/bin" "$out/licenses"

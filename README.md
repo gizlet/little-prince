@@ -81,7 +81,12 @@ scp dist/io.gizlet.littleprince-0.2.0-aarch64-unknown-linux-gnu-lite.gzl root@DE
 ssh root@DEVICE 'gizlet install /tmp/io.gizlet.littleprince-0.2.0-aarch64-unknown-linux-gnu-lite.gzl'
 ```
 
-Open the game from the launcher. To publish a release, match the versions in `Cargo.toml` and `gizlet.toml`, then push `v<version>`. CI runs the tests, builds the `.gzl`, publishes the GitHub Release, and waits for the Gizlet Store checks.
+Open the game from the launcher. To publish a release, update the version in
+`gizlet.toml` and merge to `main`.
+After tests and the `.gzl` build pass, CI creates `v<version>`, publishes the
+GitHub Release, and waits for the Gizlet Store checks. Rerun the original CI
+run to retry a failed release. Pushing a matching tag or selecting it when
+dispatching CI also starts a release.
 
 ### Performance on the R36S
 

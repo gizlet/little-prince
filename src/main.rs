@@ -61,7 +61,8 @@ fn view() -> (Rectangle, f32) {
 
 fn main() {
     if std::env::args().nth(1).as_deref() == Some("--version") {
-        println!("littleprince {}", env!("CARGO_PKG_VERSION"));
+        let version = option_env!("GIZLET_APP_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
+        println!("littleprince {version}");
         return;
     }
     let capture = std::env::var("LITTLEPRINCE_CAPTURE").ok();
