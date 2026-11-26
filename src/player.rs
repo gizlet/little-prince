@@ -160,7 +160,16 @@ impl Player {
     /// `wish` is the wanted direction along the ground (length up to 1).
     /// With `scripted` the caller drives `alt` (the flight between planets).
     #[allow(clippy::too_many_arguments)]
-    pub fn update(&mut self, dt: f32, wish: V3, jump: bool, surface: impl Fn(V3) -> f32, scripted: bool, wind: V3, time: f32) {
+    pub fn update(
+        &mut self,
+        dt: f32,
+        wish: V3,
+        jump: bool,
+        surface: impl Fn(V3) -> f32,
+        scripted: bool,
+        wind: V3,
+        time: f32,
+    ) {
         let dt = dt.max(1e-4);
         let up = self.n;
         let prev = self.vel;
@@ -369,7 +378,13 @@ impl Player {
             gl.part(kit.ball, place(elbow, up, face, v3(0.032, 0.032, 0.032) * S), suit, 0.0, r);
             let wrist = elbow.lerp(hand, 0.85);
             gl.part(kit.ball, place(wrist, hand - elbow, face, v3(0.036, 0.016, 0.036) * S), gold, 0.1, no);
-            gl.part(kit.ball, place(hand + (hand - elbow).norm() * (0.012 * S), hand - elbow, face, v3(0.03, 0.036, 0.026) * S), skin, 0.0, r);
+            gl.part(
+                kit.ball,
+                place(hand + (hand - elbow).norm() * (0.012 * S), hand - elbow, face, v3(0.03, 0.036, 0.026) * S),
+                skin,
+                0.0,
+                r,
+            );
         }
         // The neck, wrapped in the scarf.
         gl.part(kit.tube, b.part(v3(0.0, 0.73, 0.0), v3(0.035, 0.06, 0.035)), skin, 0.0, no);
@@ -386,7 +401,13 @@ impl Player {
             let open = self.blink.max(0.1) * if self.cheer > 0.3 { 0.5 } else { 1.0 };
             gl.part(kit.ball, head.part(v3(side * 0.037, -0.002, 0.088), v3(0.014, 0.021 * open, 0.01)), eye, 0.0, no);
             if open > 0.5 {
-                gl.part(kit.ball, head.part(v3(side * 0.033, 0.007, 0.097), v3(0.005, 0.005, 0.003)), rgb(0xFFFFFF), 0.8, no);
+                gl.part(
+                    kit.ball,
+                    head.part(v3(side * 0.033, 0.007, 0.097), v3(0.005, 0.005, 0.003)),
+                    rgb(0xFFFFFF),
+                    0.8,
+                    no,
+                );
             }
             gl.part(kit.ball, head.part(v3(side * 0.06, -0.035, 0.078), v3(0.018, 0.01, 0.006)), blush, 0.1, no);
             gl.part(kit.ball, head.part(v3(side * 0.04, 0.036, 0.09), v3(0.017, 0.004, 0.005)), hair_dark, 0.0, no);
@@ -409,7 +430,11 @@ impl Player {
                 }
                 let d = v3(el.cos() * az.sin(), el.sin(), el.cos() * front);
                 let bounce = (time * 2.2 + k as f32).sin() * 0.05;
-                let sweep = if el < 0.7 && front > 0.0 { v3(0.3 * az.sin().signum(), -0.6, 0.25) } else { v3(0.0, -0.2 + 0.15 * el, -0.35) };
+                let sweep = if el < 0.7 && front > 0.0 {
+                    v3(0.3 * az.sin().signum(), -0.6, 0.25)
+                } else {
+                    v3(0.0, -0.2 + 0.15 * el, -0.35)
+                };
                 let spring = v3(self.hair[1] * 0.5, bounce, self.hair[0] * 0.5) * el.sin().max(0.25);
                 let dir = head.dir(d + sweep + spring).norm();
                 let base = head.at(d * 0.1 + v3(0.0, 0.032, -0.018));
@@ -419,7 +444,13 @@ impl Player {
                 // The tip curls on round.
                 let axis = if k % 3 == 0 { head.x.norm() } else { dir.cross(up).norm() };
                 let curl = dir.rotate(axis, -1.0);
-                gl.part(kit.cone, place(base + dir * (l * 0.55 * S), curl, head.z, v3(0.026, l * 0.65, 0.02) * S), col, 0.0, r);
+                gl.part(
+                    kit.cone,
+                    place(base + dir * (l * 0.55 * S), curl, head.z, v3(0.026, l * 0.65, 0.02) * S),
+                    col,
+                    0.0,
+                    r,
+                );
             }
         }
     }
@@ -486,7 +517,9 @@ impl Player {
         let c = self.body().at(v3(0.0, 0.7, 0.0));
         for k in 0..5 {
             let a = t * 2.5 + k as f32 / 5.0 * TAU;
-            let p = c + (self.right() * a.cos() + self.face * a.sin()) * 0.28 + self.n * ((t * 3.0 + k as f32).sin() * 0.08);
+            let p = c
+                + (self.right() * a.cos() + self.face * a.sin()) * 0.28
+                + self.n * ((t * 3.0 + k as f32).sin() * 0.08);
             s.billboard(p, 0.05, rgba(rgb(0xFFE9A0), self.cheer));
         }
     }

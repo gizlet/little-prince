@@ -227,17 +227,32 @@ fn tree(b: &mut Builder, _kind: Kind, n: V3, r: f32, rng: &mut Rng) {
     let bark = rgb(0x7A5640);
     if rng.f() < 0.35 {
         mesh::frustum(b, base, n, 7, (0.0, 0.07, h * 0.3, 0.05), bark, &no_sway, false);
-        for (i, (y, rad, len)) in [(0.18f32, 0.42f32, 0.5f32), (0.42, 0.33, 0.42), (0.64, 0.23, 0.36)].into_iter().enumerate() {
+        for (i, (y, rad, len)) in
+            [(0.18f32, 0.42f32, 0.5f32), (0.42, 0.33, 0.42), (0.64, 0.23, 0.36)].into_iter().enumerate()
+        {
             let c = jitter(if i % 2 == 0 { rgb(0x3C7A4C) } else { rgb(0x4A8A56) }, rng, 0.06);
             mesh::frustum(b, base + n * (y * h), n, 10, (0.0, rad * h * 0.8, len * h, 0.0), c, &no_sway, false);
         }
     } else {
         mesh::frustum(b, base, n, 8, (0.0, 0.1, h * 0.5, 0.06), bark, &no_sway, false);
-        for (o, s) in [(v3(0.0, 0.72, 0.0), 0.42f32), (v3(0.24, 0.6, 0.12), 0.32), (v3(-0.22, 0.62, -0.1), 0.3), (v3(0.04, 0.9, -0.12), 0.28)] {
+        for (o, s) in [
+            (v3(0.0, 0.72, 0.0), 0.42f32),
+            (v3(0.24, 0.6, 0.12), 0.32),
+            (v3(-0.22, 0.62, -0.1), 0.3),
+            (v3(0.04, 0.9, -0.12), 0.28),
+        ] {
             let c = base + x * (o.x * h) + n * (o.y * h) + z * (o.z * h);
             let col = jitter(rgb(0x5E9A44), rng, 0.1);
             let s = s * h;
-            mesh::ellipsoid(b, c, [x * s, n * (s * 0.85), z * s], 1, &|p| mix(gl::scale(col, 0.75), lighten(col, 0.12), smooth((p - c).norm().dot(n) * 0.5 + 0.5)), &no_sway, true);
+            mesh::ellipsoid(
+                b,
+                c,
+                [x * s, n * (s * 0.85), z * s],
+                1,
+                &|p| mix(gl::scale(col, 0.75), lighten(col, 0.12), smooth((p - c).norm().dot(n) * 0.5 + 0.5)),
+                &no_sway,
+                true,
+            );
         }
     }
 }
@@ -246,7 +261,8 @@ fn bush(b: &mut Builder, n: V3, r: f32, rng: &mut Rng) {
     let x = any_perp(n).rotate(n, rng.range(0.0, TAU));
     let z = n.cross(x);
     let s = rng.range(0.14, 0.32);
-    let col = jitter([rgb(0x4E8236), rgb(0x5E9440), rgb(0x6FA348), rgb(0x8AAE4E)][(rng.next() % 4) as usize], rng, 0.08);
+    let col =
+        jitter([rgb(0x4E8236), rgb(0x5E9440), rgb(0x6FA348), rgb(0x8AAE4E)][(rng.next() % 4) as usize], rng, 0.08);
     for k in 0..(2 + rng.next() % 2) {
         let a = k as f32 * 2.2 + rng.f();
         let o = (x * a.cos() + z * a.sin()) * (s * 0.6);
@@ -263,7 +279,15 @@ fn mossy_rock(b: &mut Builder, n: V3, r: f32, size: f32, rng: &mut Rng) {
     let stone = jitter(rgb(0x938C86), rng, 0.08);
     let moss = rgb(0x6F8F45);
     let axes = [x * size, n * (size * rng.range(0.45, 0.7)), z * (size * rng.range(0.6, 0.9))];
-    mesh::ellipsoid(b, c, axes, if size < 0.2 { 0 } else { 1 }, &|p| mix(stone, moss, smooth(((p - c).norm().dot(n) - 0.35) / 0.3)), &no_sway, false);
+    mesh::ellipsoid(
+        b,
+        c,
+        axes,
+        if size < 0.2 { 0 } else { 1 },
+        &|p| mix(stone, moss, smooth(((p - c).norm().dot(n) - 0.35) / 0.3)),
+        &no_sway,
+        false,
+    );
 }
 
 fn fence_post(b: &mut Builder, n: V3, r: f32) {
@@ -390,17 +414,21 @@ impl Fox {
                     self.still = 0.0;
                     self.trust += 1;
                     scored = true;
-                    fx.burst(pos + self.n * 0.35, self.n, Burst {
-                        n: 10,
-                        speed: (0.2, 0.5),
-                        size: (0.04, 0.07),
-                        life: (1.0, 1.6),
-                        cols: &[rgb(0xFF8FA6), rgb(0xFFC2D0)],
-                        glow: true,
-                        grav: -0.25,
-                        drag: 1.2,
-                        aim: 0.8,
-                    });
+                    fx.burst(
+                        pos + self.n * 0.35,
+                        self.n,
+                        Burst {
+                            n: 10,
+                            speed: (0.2, 0.5),
+                            size: (0.04, 0.07),
+                            life: (1.0, 1.6),
+                            cols: &[rgb(0xFF8FA6), rgb(0xFFC2D0)],
+                            glow: true,
+                            grav: -0.25,
+                            drag: 1.2,
+                            aim: 0.8,
+                        },
+                    );
                     snd.play(Sfx::Chime(self.trust + 1), 1.0, 0.45);
                     if self.trust == FOX_TRUST {
                         fx.ring(pos, self.n, 1.2, 1.0, rgb(0xFFC15E));
@@ -592,9 +620,26 @@ impl World {
                     let base = n * (r(n) - 0.06);
                     let col = if active { rgb(0x9C7462) } else { rgb(0x8E8896) };
                     mesh::frustum(&mut props, base, n, 20, (0.0, 0.22 * k, 0.21 * k, 0.1 * k), col, &no_sway, false);
-                    mesh::frustum(&mut props, base + n * (0.2 * k), n, 20, (0.0, 0.105 * k, 0.025 * k, 0.08 * k), gl::scale(col, 0.85), &no_sway, true);
+                    mesh::frustum(
+                        &mut props,
+                        base + n * (0.2 * k),
+                        n,
+                        20,
+                        (0.0, 0.105 * k, 0.025 * k, 0.08 * k),
+                        gl::scale(col, 0.85),
+                        &no_sway,
+                        true,
+                    );
                     let x = any_perp(n);
-                    mesh::ellipsoid(&mut props, base + n * (0.222 * k), [x * (0.085 * k), n * 0.01, n.cross(x) * (0.085 * k)], 2, &|_| rgb(0x4A3530), &no_sway, true);
+                    mesh::ellipsoid(
+                        &mut props,
+                        base + n * (0.222 * k),
+                        [x * (0.085 * k), n * 0.01, n.cross(x) * (0.085 * k)],
+                        2,
+                        &|_| rgb(0x4A3530),
+                        &no_sway,
+                        true,
+                    );
                     w.volcanoes.push(Volcano { top: base + n * (0.23 * k), n, active, puff: rng.f() });
                 }
                 let rn = spot(0.11, 0.06);
@@ -606,11 +651,29 @@ impl World {
                 let f = Frame::new(cn * (r(cn) - 0.01), cn, -w.sun0);
                 let wood = rgb(0xB57D52);
                 for (x, z) in [(-1.0f32, -1.0f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
-                    mesh::frustum(&mut props, f.at(v3(x * 0.07, 0.0, z * 0.07)), f.y, 6, (0.0, 0.012, 0.15, 0.012), wood, &no_sway, true);
+                    mesh::frustum(
+                        &mut props,
+                        f.at(v3(x * 0.07, 0.0, z * 0.07)),
+                        f.y,
+                        6,
+                        (0.0, 0.012, 0.15, 0.012),
+                        wood,
+                        &no_sway,
+                        true,
+                    );
                 }
                 mesh::cuboid(&mut props, f.at(v3(0.0, 0.16, 0.0)), [f.x * 0.095, f.y * 0.014, f.z * 0.095], wood);
                 for x in [-1.0f32, 1.0] {
-                    mesh::frustum(&mut props, f.at(v3(x * 0.07, 0.16, -0.08)), f.y, 6, (0.0, 0.012, 0.18, 0.012), wood, &no_sway, true);
+                    mesh::frustum(
+                        &mut props,
+                        f.at(v3(x * 0.07, 0.16, -0.08)),
+                        f.y,
+                        6,
+                        (0.0, 0.012, 0.18, 0.012),
+                        wood,
+                        &no_sway,
+                        true,
+                    );
                 }
                 mesh::cuboid(&mut props, f.at(v3(0.0, 0.3, -0.08)), [f.x * 0.09, f.y * 0.04, f.z * 0.012], wood);
                 // The baobab that was not pulled up in time: a landmark on the far hill.
@@ -621,7 +684,7 @@ impl World {
                 let path = b612_path();
                 for (i, w2) in path[30..58].windows(2).enumerate().step_by(3) {
                     let (a, b) = (w2[0], w2[1]);
-                    let side = a.cross(b - a).norm() * (0.06 / 9.0) ;
+                    let side = a.cross(b - a).norm() * (0.06 / 9.0);
                     let p0 = (a + side * 6.0).norm();
                     let _ = i;
                     fence_post(&mut props, p0, r(p0));
@@ -639,7 +702,13 @@ impl World {
                     }
                 }
                 for n in scatter(&mut rng, 7, 0.09, &mut taken, &|d| d.dot(V3::Y) > 0.9 && off_path(d, 0.35)) {
-                    w.sprouts.push(Sprout { n, pos: n * r(n), grow: rng.range(0.6, 1.0), pulled: None, phase: rng.f() * TAU });
+                    w.sprouts.push(Sprout {
+                        n,
+                        pos: n * r(n),
+                        grow: rng.range(0.6, 1.0),
+                        pulled: None,
+                        phase: rng.f() * TAU,
+                    });
                 }
                 for n in scatter(&mut rng, 30, 0.14, &mut taken, &|d| off_path(d, 0.9) && d.dot(V3::Y) < 0.985) {
                     tree(&mut props, Kind::B612, n, r(n), &mut rng);
@@ -652,7 +721,8 @@ impl World {
                     mossy_rock(&mut props, n, r(n), size, &mut rng);
                 }
                 // Patches of flowers: daisies, pink, yellow and lilac.
-                let flowers = [rgb(0xFFFFFF), rgb(0xFFF6E0), rgb(0xFFB3C8), rgb(0xFFE070), rgb(0xC6A8F0), rgb(0xFF8FA3)];
+                let flowers =
+                    [rgb(0xFFFFFF), rgb(0xFFF6E0), rgb(0xFFB3C8), rgb(0xFFE070), rgb(0xC6A8F0), rgb(0xFF8FA3)];
                 let mut placed = 0;
                 while placed < 600 {
                     let c = rng.dir();
@@ -670,21 +740,22 @@ impl World {
                 }
                 let bare = taken.clone();
                 let keep = move |d: V3| path_dist(d) > 0.28 && bare.iter().all(|t| t.dot(d) < 0.99985);
-                grass = mesh::grass(&mut rng, 15000, r, &keep, (0.09, 0.21), &[
-                    rgb(0x5A8C3A),
-                    rgb(0x6C9C42),
-                    rgb(0x7FAD4C),
-                    rgb(0x93BB58),
-                    rgb(0x4D7A33),
-                    rgb(0xA3B95A),
-                ]);
+                grass = mesh::grass(
+                    &mut rng,
+                    15000,
+                    r,
+                    &keep,
+                    (0.09, 0.21),
+                    &[rgb(0x5A8C3A), rgb(0x6C9C42), rgb(0x7FAD4C), rgb(0x93BB58), rgb(0x4D7A33), rgb(0xA3B95A)],
+                );
                 for _ in 0..18 {
                     let d = rng.dir();
                     w.clouds.push((d, any_perp(d), rng.range(0.006, 0.014), rng.range(0.9, 1.6)));
                 }
                 for _ in 0..40 {
                     let d = (V3::Y + rng.dir() * 0.4).norm();
-                    let c = [rgb(0xFFF3A8), rgb(0xFFFFFF), rgb(0xFFB0C8), rgb(0xA8D8FF), rgb(0xFFC070)][(rng.next() % 5) as usize];
+                    let c = [rgb(0xFFF3A8), rgb(0xFFFFFF), rgb(0xFFB0C8), rgb(0xA8D8FF), rgb(0xFFC070)]
+                        [(rng.next() % 5) as usize];
                     w.butterflies.push((d, rng.f() * TAU, c));
                 }
                 w.total = w.sprouts.len();
@@ -700,7 +771,13 @@ impl World {
                 w.lamp = Some(LampPost { n: ln, head: base + ln * 0.93, lit: false, on: 0.0 });
                 let kn = ln.rotate(any_perp(ln).rotate(ln, 1.2), 0.17);
                 taken.push(kn);
-                w.keeper = Some(Keeper { n: kn, pos: kn * r(kn), face: (base - kn * r(kn)).flatten(kn).norm(), anim: None, raise: 0.0 });
+                w.keeper = Some(Keeper {
+                    n: kn,
+                    pos: kn * r(kn),
+                    face: (base - kn * r(kn)).flatten(kn).norm(),
+                    anim: None,
+                    raise: 0.0,
+                });
                 for n in scatter(&mut rng, 5, 0.4, &mut taken, &|_| true) {
                     rock(&mut props, n, r(n), rgb(0xA89A92), 0.06, &mut rng);
                 }
@@ -712,10 +789,14 @@ impl World {
                     }
                 }
                 let bare = taken.clone();
-                grass = mesh::grass(&mut rng, 300, &r, &|d| bare.iter().all(|t| t.dot(d) < 0.993), (0.03, 0.07), &[
-                    rgb(0x8FB070),
-                    rgb(0xA0BE7A),
-                ]);
+                grass = mesh::grass(
+                    &mut rng,
+                    300,
+                    &r,
+                    &|d| bare.iter().all(|t| t.dot(d) < 0.993),
+                    (0.03, 0.07),
+                    &[rgb(0x8FB070), rgb(0xA0BE7A)],
+                );
                 w.total = 44;
             }
             Kind::Desert => {
@@ -728,20 +809,62 @@ impl World {
                 let red = rgb(0xC9473E);
                 let cream = rgb(0xEFE6D2);
                 let ax = |l: V3| [f.x * l.x, f.y * l.y, f.z * l.z];
-                mesh::ellipsoid(&mut props, f.at(v3(0.0, 0.08, 0.0)), ax(v3(0.13, 0.12, 0.55)), 2, &|_| cream, &no_sway, true);
-                mesh::frustum(&mut props, f.at(v3(0.0, 0.08, 0.45)), f.z, 16, (0.0, 0.115, 0.12, 0.07), red, &no_sway, true);
-                mesh::ellipsoid(&mut props, f.at(v3(0.0, 0.18, 0.02)), ax(v3(0.07, 0.04, 0.1)), 1, &|_| rgb(0x3B3340), &no_sway, true);
+                mesh::ellipsoid(
+                    &mut props,
+                    f.at(v3(0.0, 0.08, 0.0)),
+                    ax(v3(0.13, 0.12, 0.55)),
+                    2,
+                    &|_| cream,
+                    &no_sway,
+                    true,
+                );
+                mesh::frustum(
+                    &mut props,
+                    f.at(v3(0.0, 0.08, 0.45)),
+                    f.z,
+                    16,
+                    (0.0, 0.115, 0.12, 0.07),
+                    red,
+                    &no_sway,
+                    true,
+                );
+                mesh::ellipsoid(
+                    &mut props,
+                    f.at(v3(0.0, 0.18, 0.02)),
+                    ax(v3(0.07, 0.04, 0.1)),
+                    1,
+                    &|_| rgb(0x3B3340),
+                    &no_sway,
+                    true,
+                );
                 mesh::cuboid(&mut props, f.at(v3(0.0, 0.0, 0.12)), ax(v3(0.78, 0.018, 0.13)), red);
                 mesh::cuboid(&mut props, f.at(v3(0.0, 0.3, 0.16)), ax(v3(0.82, 0.018, 0.13)), lighten(red, 0.1));
                 for x in [-0.55f32, -0.25, 0.25, 0.55] {
                     for z in [0.07f32, 0.24] {
-                        mesh::frustum(&mut props, f.at(v3(x, 0.0, z)), f.y, 5, (0.0, 0.01, 0.3, 0.01), rgb(0x5A4A42), &no_sway, true);
+                        mesh::frustum(
+                            &mut props,
+                            f.at(v3(x, 0.0, z)),
+                            f.y,
+                            5,
+                            (0.0, 0.01, 0.3, 0.01),
+                            rgb(0x5A4A42),
+                            &no_sway,
+                            true,
+                        );
                     }
                 }
                 mesh::cuboid(&mut props, f.at(v3(0.0, 0.1, -0.52)), ax(v3(0.26, 0.014, 0.07)), red);
                 mesh::cuboid(&mut props, f.at(v3(0.0, 0.2, -0.53)), ax(v3(0.014, 0.11, 0.08)), red);
                 for x in [-0.15f32, 0.15] {
-                    mesh::ellipsoid(&mut props, f.at(v3(x, -0.1, 0.2)), ax(v3(0.02, 0.06, 0.06)), 1, &|_| rgb(0x3B3340), &no_sway, true);
+                    mesh::ellipsoid(
+                        &mut props,
+                        f.at(v3(x, -0.1, 0.2)),
+                        ax(v3(0.02, 0.06, 0.06)),
+                        1,
+                        &|_| rgb(0x3B3340),
+                        &no_sway,
+                        true,
+                    );
                 }
                 w.prop = Some(f.moved(v3(0.0, 0.08, 0.6)));
                 let fox = Fox::new(spawn);
@@ -754,20 +877,38 @@ impl World {
                 for n in scatter(&mut rng, 10, 0.1, &mut taken, &|d| d.dot(wheat) < 0.96) {
                     let c = jitter(rgb(0x9C8F5A), &mut rng, 0.1);
                     let x = any_perp(n);
-                    mesh::ellipsoid(&mut decor, n * (r(n) + 0.03), [x * 0.07, n * 0.05, n.cross(x) * 0.07], 1, &|_| c, &no_sway, true);
+                    mesh::ellipsoid(
+                        &mut decor,
+                        n * (r(n) + 0.03),
+                        [x * 0.07, n * 0.05, n.cross(x) * 0.07],
+                        1,
+                        &|_| c,
+                        &no_sway,
+                        true,
+                    );
                 }
                 let bare = taken.clone();
                 let field = move |d: V3| d.dot(wheat) > 0.982 && bare.iter().all(|t| t.dot(d) < 0.9993);
-                grass = mesh::grass(&mut rng, 1600, &r, &field, (0.1, 0.22), &[rgb(0xC99E48), rgb(0xB68C3C), rgb(0xD6B25A)]);
+                grass = mesh::grass(
+                    &mut rng,
+                    1600,
+                    &r,
+                    &field,
+                    (0.1, 0.22),
+                    &[rgb(0xC99E48), rgb(0xB68C3C), rgb(0xD6B25A)],
+                );
                 w.total = FOX_TRUST;
             }
         }
         let lo = props.lo.take().map(|b| *b).unwrap_or_default();
-        w.tiles = mesh::tiles([ground, props, lo, decor, grass], mesh::TileLayers {
-            props: !crate::prof::skip("props"),
-            flowers: !crate::prof::skip("flowers"),
-            grass: !crate::prof::skip("grass"),
-        });
+        w.tiles = mesh::tiles(
+            [ground, props, lo, decor, grass],
+            mesh::TileLayers {
+                props: !crate::prof::skip("props"),
+                flowers: !crate::prof::skip("flowers"),
+                grass: !crate::prof::skip("grass"),
+            },
+        );
         w
     }
 
@@ -830,7 +971,8 @@ impl World {
         match self.kind {
             Kind::B612 => {
                 let near = |a: &V3, b: &V3| (*a - from).len().total_cmp(&(*b - from).len());
-                let ready: Vec<V3> = self.sprouts.iter().filter(|s| s.pulled.is_none() && s.grow > 0.55).map(|s| s.pos).collect();
+                let ready: Vec<V3> =
+                    self.sprouts.iter().filter(|s| s.pulled.is_none() && s.grow > 0.55).map(|s| s.pos).collect();
                 match ready.into_iter().min_by(near) {
                     Some(p) => Some((p, 0.0, false)),
                     None => self.rose.as_ref().map(|r| (r.pos, 0.55, true)),
@@ -870,7 +1012,8 @@ impl World {
                     if v.puff < 0.0 {
                         v.puff = 0.35 + self.rng.f() * 0.3;
                         let vel = v.n * self.rng.range(0.18, 0.3) + wind * 0.08 + self.rng.dir() * 0.03;
-                        let mut s = Particle::new(v.top, vel * 1.8, self.rng.range(2.5, 3.5), 0.1, rgb(0xE6DEE0), false);
+                        let mut s =
+                            Particle::new(v.top, vel * 1.8, self.rng.range(2.5, 3.5), 0.1, rgb(0xE6DEE0), false);
                         s.grow = 0.16;
                         s.drag = 0.2;
                         s.grav = -0.02;
@@ -892,28 +1035,36 @@ impl World {
                             if s.grow > 0.4 && (s.pos - p.feet).len() < 0.3 {
                                 s.pulled = Some(0.0);
                                 pulled += 1;
-                                fx.burst(s.pos + s.n * 0.06, s.n, Burst {
-                                    n: 16,
-                                    speed: (0.4, 1.2),
-                                    size: (0.025, 0.05),
-                                    life: (0.6, 1.2),
-                                    cols: &[rgb(0x7CC35A), rgb(0x9ED36E), rgb(0x8A6A4A)],
-                                    glow: false,
-                                    grav: 3.0,
-                                    drag: 1.0,
-                                    aim: 0.6,
-                                });
-                                fx.burst(s.pos + s.n * 0.1, s.n, Burst {
-                                    n: 12,
-                                    speed: (0.3, 0.9),
-                                    size: (0.03, 0.06),
-                                    life: (0.5, 1.0),
-                                    cols: &[rgb(0xFFF1A8), rgb(0xFFFFFF)],
-                                    glow: true,
-                                    grav: -0.2,
-                                    drag: 2.0,
-                                    aim: 0.5,
-                                });
+                                fx.burst(
+                                    s.pos + s.n * 0.06,
+                                    s.n,
+                                    Burst {
+                                        n: 16,
+                                        speed: (0.4, 1.2),
+                                        size: (0.025, 0.05),
+                                        life: (0.6, 1.2),
+                                        cols: &[rgb(0x7CC35A), rgb(0x9ED36E), rgb(0x8A6A4A)],
+                                        glow: false,
+                                        grav: 3.0,
+                                        drag: 1.0,
+                                        aim: 0.6,
+                                    },
+                                );
+                                fx.burst(
+                                    s.pos + s.n * 0.1,
+                                    s.n,
+                                    Burst {
+                                        n: 12,
+                                        speed: (0.3, 0.9),
+                                        size: (0.03, 0.06),
+                                        life: (0.5, 1.0),
+                                        cols: &[rgb(0xFFF1A8), rgb(0xFFFFFF)],
+                                        glow: true,
+                                        grav: -0.2,
+                                        drag: 2.0,
+                                        aim: 0.5,
+                                    },
+                                );
                                 fx.ring(s.pos, s.n, 0.45, 0.6, rgb(0xFFE9A8));
                                 snd.play(Sfx::Pop, 0.9 + i as f32 * 0.05, 0.6);
                                 snd.play(Sfx::Splash, 1.6, 0.15);
@@ -928,22 +1079,27 @@ impl World {
                     let d = (rose.pos - p.feet).len();
                     let near = d < 0.7;
                     if near && !rose.near {
-                        fx.burst(rose.pos + rose.n * 0.2, rose.n, Burst {
-                            n: 14,
-                            speed: (0.2, 0.6),
-                            size: (0.03, 0.06),
-                            life: (0.8, 1.5),
-                            cols: &[rgb(0xFF8FA6), rgb(0xFFD0DC)],
-                            glow: true,
-                            grav: -0.2,
-                            drag: 1.5,
-                            aim: 0.3,
-                        });
+                        fx.burst(
+                            rose.pos + rose.n * 0.2,
+                            rose.n,
+                            Burst {
+                                n: 14,
+                                speed: (0.2, 0.6),
+                                size: (0.03, 0.06),
+                                life: (0.8, 1.5),
+                                cols: &[rgb(0xFF8FA6), rgb(0xFFD0DC)],
+                                glow: true,
+                                grav: -0.2,
+                                drag: 1.5,
+                                aim: 0.3,
+                            },
+                        );
                         snd.play(Sfx::Chime(4), 1.0, 0.35);
                     }
                     rose.near = near;
                     rose.open = approach(rose.open, if near { 1.0 } else { 0.55 }, 2.0, dt);
-                    let want = if near { (p.feet - rose.pos).flatten(rose.n).norm() } else { sun.flatten(rose.n).norm() };
+                    let want =
+                        if near { (p.feet - rose.pos).flatten(rose.n).norm() } else { sun.flatten(rose.n).norm() };
                     rose.look = crate::math::approach3(rose.look, want, 2.0, dt).norm();
                 }
             }
@@ -958,17 +1114,21 @@ impl World {
                             if before < 0.55 && *u >= 0.55 {
                                 lamp.lit = *to;
                                 let col = if *to { rgb(0xFFD98A) } else { rgb(0xBFC6D6) };
-                                fx.burst(lamp.head, lamp.n, Burst {
-                                    n: if *to { 26 } else { 10 },
-                                    speed: (0.3, 1.0),
-                                    size: (0.025, 0.06),
-                                    life: (0.5, 1.1),
-                                    cols: &[col, lighten(col, 0.5)],
-                                    glow: *to,
-                                    grav: if *to { 0.6 } else { -0.3 },
-                                    drag: 1.6,
-                                    aim: 0.2,
-                                });
+                                fx.burst(
+                                    lamp.head,
+                                    lamp.n,
+                                    Burst {
+                                        n: if *to { 26 } else { 10 },
+                                        speed: (0.3, 1.0),
+                                        size: (0.025, 0.06),
+                                        life: (0.5, 1.1),
+                                        cols: &[col, lighten(col, 0.5)],
+                                        glow: *to,
+                                        grav: if *to { 0.6 } else { -0.3 },
+                                        drag: 1.6,
+                                        aim: 0.2,
+                                    },
+                                );
                                 snd.play(Sfx::Chime(if *to { 3 } else { 1 }), 1.0, 0.45);
                             }
                             if *u > 1.3 {
@@ -1123,7 +1283,13 @@ impl World {
             if v.active {
                 let x = any_perp(v.n);
                 let glow = 1.0 + 0.4 * (t * 3.0 + v.puff).sin();
-                gl.part(kit.ball, place(v.top - v.n * 0.004, v.n, x, v3(0.07, 0.008, 0.07)), rgb(0xFF8A3D), glow, Ink::None);
+                gl.part(
+                    kit.ball,
+                    place(v.top - v.n * 0.004, v.n, x, v3(0.07, 0.008, 0.07)),
+                    rgb(0xFF8A3D),
+                    glow,
+                    Ink::None,
+                );
             }
         }
         for s in &self.sprouts {
@@ -1146,7 +1312,13 @@ impl World {
             for k in 0..3 {
                 let out = x.rotate(dir, k as f32 / 3.0 * TAU);
                 let leaf = (out + dir * 0.5).norm();
-                gl.part(kit.ball, place(top + leaf * (0.045 * g), leaf, dir, v3(0.022, 0.05, 0.007) * g), rgb(0x7CC35A), 0.05, ri);
+                gl.part(
+                    kit.ball,
+                    place(top + leaf * (0.045 * g), leaf, dir, v3(0.022, 0.05, 0.007) * g),
+                    rgb(0x7CC35A),
+                    0.05,
+                    ri,
+                );
             }
         }
         if let Some(r) = &self.rose {
@@ -1158,7 +1330,13 @@ impl World {
             for (k, h) in [(0.0f32, 0.08f32), (PI, 0.12)] {
                 let out = x.rotate(dir, k + 0.6);
                 let leaf = (out + dir * 0.6).norm();
-                gl.part(kit.ball, place(r.pos + dir * h + leaf * 0.035, leaf, dir, v3(0.02, 0.04, 0.006)), rgb(0x5FA052), 0.0, ri);
+                gl.part(
+                    kit.ball,
+                    place(r.pos + dir * h + leaf * 0.035, leaf, dir, v3(0.02, 0.04, 0.006)),
+                    rgb(0x5FA052),
+                    0.0,
+                    ri,
+                );
             }
             let head = r.pos + dir * 0.22;
             let open = r.open;
@@ -1168,7 +1346,13 @@ impl World {
                 let theta = 0.25 + open * 0.75 + if p % 2 == 0 { 0.1 } else { 0.0 };
                 let axis = (dir * theta.cos() + out * theta.sin()).norm();
                 let normal = axis.cross(dir.cross(out)).norm();
-                gl.part(kit.ball, place(head + axis * 0.03, axis, normal, v3(0.028, 0.042, 0.01)), rgb(0xE0444E), 0.05, ri);
+                gl.part(
+                    kit.ball,
+                    place(head + axis * 0.03, axis, normal, v3(0.028, 0.042, 0.01)),
+                    rgb(0xE0444E),
+                    0.05,
+                    ri,
+                );
             }
             gl.part(kit.ball, place(head + dir * 0.012, dir, x, v3(0.027, 0.034, 0.027)), rgb(0xC22F40), 0.05, ri);
         }
@@ -1176,7 +1360,13 @@ impl World {
             let x = any_perp(l.n);
             let iron = rgb(0x34304A);
             gl.part(kit.cone, place(l.head + l.n * 0.055, l.n, x, v3(0.075, 0.07, 0.075)), iron, 0.0, ri);
-            gl.part(kit.ball, place(l.head, l.n, x, v3(0.048, 0.06, 0.048)), mix(rgb(0xC9CFE0), rgb(0xFFD98A), l.on), l.on * 1.3, ri);
+            gl.part(
+                kit.ball,
+                place(l.head, l.n, x, v3(0.048, 0.06, 0.048)),
+                mix(rgb(0xC9CFE0), rgb(0xFFD98A), l.on),
+                l.on * 1.3,
+                ri,
+            );
             gl.part(kit.stub, place(l.head - l.n * 0.075, l.n, x, v3(0.045, 0.02, 0.045)), iron, 0.0, ri);
         }
         if let Some(k) = &self.keeper {
@@ -1190,7 +1380,13 @@ impl World {
             for k in [0.0, PI] {
                 let blade = f.x.rotate(f.z, a + k);
                 let side = f.y.rotate(f.z, a + k);
-                gl.part(kit.cube, crate::math::basis(blade * 0.16, side * 0.025, f.z * 0.01, f.o + blade * 0.16), rgb(0x8A5A3B), 0.0, ri);
+                gl.part(
+                    kit.cube,
+                    crate::math::basis(blade * 0.16, side * 0.025, f.z * 0.01, f.o + blade * 0.16),
+                    rgb(0x8A5A3B),
+                    0.0,
+                    ri,
+                );
             }
             gl.part(kit.ball, place(f.o, f.z, f.y, v3(0.035, 0.03, 0.035)), rgb(0xC9473E), 0.0, ri);
         }
@@ -1228,13 +1424,25 @@ impl World {
         kit.limb(gl, b.at(v3(-0.09, 0.34, 0.0)), b.at(v3(-0.12, 0.19, 0.02)), 0.026, coat);
         gl.part(kit.ball, b.part(v3(-0.12, 0.18, 0.02), v3(0.026, 0.026, 0.026)), skin, 0.0, ri);
         let pd = tip - hand;
-        gl.part(kit.tube, place(hand - pd * 0.15, pd, k.face, v3(0.008, pd.len() * 1.15, 0.008)), rgb(0x8A5A3B), 0.0, ri);
+        gl.part(
+            kit.tube,
+            place(hand - pd * 0.15, pd, k.face, v3(0.008, pd.len() * 1.15, 0.008)),
+            rgb(0x8A5A3B),
+            0.0,
+            ri,
+        );
         let head = b.moved(v3(0.0, 0.45, 0.0)).turned(0, -k.raise * 0.35 + (t * 0.8).sin() * 0.03);
         gl.part(kit.ball, head.part(V3::ZERO, v3(0.1, 0.1, 0.095)), skin, 0.0, ri);
         gl.part(kit.ball, head.part(v3(0.0, -0.01, 0.095), v3(0.024, 0.022, 0.022)), rgb(0xF4A9A0), 0.0, Ink::None);
         gl.part(kit.ball, head.part(v3(0.0, -0.04, 0.085), v3(0.055, 0.014, 0.02)), rgb(0x6B4A3A), 0.0, Ink::None);
         for side in [-1.0f32, 1.0] {
-            gl.part(kit.ball, head.part(v3(side * 0.035, 0.015, 0.088), v3(0.01, 0.014, 0.008)), rgb(0x2A2230), 0.0, Ink::None);
+            gl.part(
+                kit.ball,
+                head.part(v3(side * 0.035, 0.015, 0.088), v3(0.01, 0.014, 0.008)),
+                rgb(0x2A2230),
+                0.0,
+                Ink::None,
+            );
         }
         gl.part(kit.stub, head.part(v3(0.0, 0.05, 0.0), v3(0.1, 0.075, 0.1)), navy, 0.0, ri);
         gl.part(kit.ball, head.part(v3(0.0, 0.055, 0.075), v3(0.075, 0.01, 0.05)), rgb(0x232845), 0.0, ri);
@@ -1283,7 +1491,11 @@ impl World {
         }
         if let Some(r) = &self.rose {
             let k = 0.5 + 0.5 * (t * 2.0).sin();
-            s.billboard(r.pos + r.n * 0.18, 0.12 + 0.05 * k, rgba(rgb(0xFFB0C0), 0.15 + 0.2 * (r.open - 0.55).max(0.0) * 2.0));
+            s.billboard(
+                r.pos + r.n * 0.18,
+                0.12 + 0.05 * k,
+                rgba(rgb(0xFFB0C0), 0.15 + 0.2 * (r.open - 0.55).max(0.0) * 2.0),
+            );
         }
         if let Some(l) = &self.lamp {
             if l.on > 0.01 {
@@ -1318,7 +1530,11 @@ fn draw_fox(gl: &Gl, kit: &Kit, f: &Fox, r: f32, t: f32) {
         let ph = f.phase + if k % 3 == 0 { 0.0 } else { PI };
         let swing = ph.sin() * 0.06 * run;
         let hip = b.at(v3(x * 0.045, 0.13, z * 0.09));
-        let foot = if z < 0.0 && f.sit > 0.5 { g.at(v3(x * 0.06, 0.02, -0.02)) } else { g.at(v3(x * 0.045, 0.02, z * 0.09 * (1.0 - f.sit * 0.3) + swing)) };
+        let foot = if z < 0.0 && f.sit > 0.5 {
+            g.at(v3(x * 0.06, 0.02, -0.02))
+        } else {
+            g.at(v3(x * 0.045, 0.02, z * 0.09 * (1.0 - f.sit * 0.3) + swing))
+        };
         kit.limb(gl, hip, foot, 0.022, orange);
         gl.part(kit.ball, place(foot, f.n, f.face, v3(0.022, 0.018, 0.03)), dark, 0.0, ri);
     }
@@ -1333,9 +1549,27 @@ fn draw_fox(gl: &Gl, kit: &Kit, f: &Fox, r: f32, t: f32) {
     gl.part(kit.ball, head.part(v3(0.0, -0.008, 0.13), v3(0.014, 0.012, 0.012)), rgb(0x2A1A18), 0.0, Ink::None);
     for side in [-1.0f32, 1.0] {
         let ear = head.dir(v3(side * 0.45, 1.0, -0.1) + v3(0.0, 0.0, (t * 3.0 + side).sin() * 0.08)).norm();
-        gl.part(kit.cone, place(head.at(v3(side * 0.04, 0.04, -0.01)), ear, head.z, v3(0.03, 0.085, 0.016)), orange, 0.0, ri);
-        gl.part(kit.cone, place(head.at(v3(side * 0.04, 0.045, 0.002)), ear, head.z, v3(0.017, 0.06, 0.008)), dark, 0.0, Ink::None);
-        gl.part(kit.ball, head.part(v3(side * 0.03, 0.012, 0.062), v3(0.01, 0.015, 0.008)), rgb(0x2A1A18), 0.0, Ink::None);
+        gl.part(
+            kit.cone,
+            place(head.at(v3(side * 0.04, 0.04, -0.01)), ear, head.z, v3(0.03, 0.085, 0.016)),
+            orange,
+            0.0,
+            ri,
+        );
+        gl.part(
+            kit.cone,
+            place(head.at(v3(side * 0.04, 0.045, 0.002)), ear, head.z, v3(0.017, 0.06, 0.008)),
+            dark,
+            0.0,
+            Ink::None,
+        );
+        gl.part(
+            kit.ball,
+            head.part(v3(side * 0.03, 0.012, 0.062), v3(0.01, 0.015, 0.008)),
+            rgb(0x2A1A18),
+            0.0,
+            Ink::None,
+        );
     }
     // The tail: a curve of balls, bushy at the end with a white tip.
     let wag = f.wag.sin() * 0.6;

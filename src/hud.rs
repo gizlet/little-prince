@@ -64,7 +64,12 @@ pub fn prepare(app: &App, k: f32) {
         unsafe {
             ffi::BeginTextureMode(cache.rt);
             ffi::ClearBackground(Color { r: 0, g: 0, b: 0, a: 0 });
-            ffi::BeginMode2D(Camera2D { offset: Vector2 { x: 0.0, y: 0.0 }, target: Vector2 { x: 0.0, y: 0.0 }, rotation: 0.0, zoom: k });
+            ffi::BeginMode2D(Camera2D {
+                offset: Vector2 { x: 0.0, y: 0.0 },
+                target: Vector2 { x: 0.0, y: 0.0 },
+                rotation: 0.0,
+                zoom: k,
+            });
             // Keep the texture premultiplied, so it composites like the live HUD.
             ffi::rlSetBlendFactorsSeparate(0x0302, 0x0303, 1, 0x0303, 0x8006, 0x8006);
             ffi::BeginBlendMode(ffi::BlendMode::BLEND_CUSTOM_SEPARATE as i32);
@@ -99,7 +104,14 @@ fn blit_cache() {
                 for (x, y, w, h) in parts {
                     // The texture is upside down: rows are counted from the bottom.
                     let src = Rectangle { x: x * k, y: (480.0 - y - h) * k, width: w * k, height: -h * k };
-                    ffi::DrawTexturePro(t, src, Rectangle { x, y, width: w, height: h }, Vector2 { x: 0.0, y: 0.0 }, 0.0, rgb(0xFFFFFF));
+                    ffi::DrawTexturePro(
+                        t,
+                        src,
+                        Rectangle { x, y, width: w, height: h },
+                        Vector2 { x: 0.0, y: 0.0 },
+                        0.0,
+                        rgb(0xFFFFFF),
+                    );
                 }
                 ffi::EndBlendMode();
             }
@@ -203,7 +215,11 @@ fn play(app: &App) {
     }
 
     // The score, popping when it grows.
-    let text = if w.total > 0 { format!("{} {}/{}", s(label, l), w.score, w.total) } else { format!("{} {}", s(label, l), w.score) };
+    let text = if w.total > 0 {
+        format!("{} {}/{}", s(label, l), w.score, w.total)
+    } else {
+        format!("{} {}", s(label, l), w.score)
+    };
     let pop = w.pop * w.pop;
     let size = 16.0 * (1.0 + 0.3 * pop);
     let tw = f.measure(&text, size, Weight::Text);
@@ -223,7 +239,6 @@ fn play(app: &App) {
         let a = smooth(app.mode_t / 0.5) * (1.0 - smooth((app.mode_t - 3.2) / 0.6));
         f.shadowed(s(T::Warping, l), 320.0, 404.0, 16.0, rgba(CREAM, a), Align::Center, Weight::Text);
     }
-
 }
 
 /// The prompt bar and the credit: they change only with the language and effects level.
@@ -243,8 +258,10 @@ fn bar(app: &App) {
         ("B", s(T::Back, l)),
     ];
     let size = 11.0;
-    let widths: Vec<(f32, f32)> =
-        items.iter().map(|(b, a)| (f.measure(b, size, Weight::Text) + 10.0, f.measure(a, size, Weight::Text))).collect();
+    let widths: Vec<(f32, f32)> = items
+        .iter()
+        .map(|(b, a)| (f.measure(b, size, Weight::Text) + 10.0, f.measure(a, size, Weight::Text)))
+        .collect();
     let total: f32 = widths.iter().map(|(b, a)| b + 4.0 + a).sum::<f32>() + 12.0 * (items.len() as f32 - 1.0);
     let mut x = 320.0 - total / 2.0;
     let y = 456.0;
@@ -270,7 +287,15 @@ fn stats(app: &App) {
     let n = st.now;
     let ms = st.frame_ms();
     let fps = if ms > 0.0 { 1000.0 / ms } else { 0.0 };
-    let good = |fps: f32| if fps >= 55.0 { rgb(0x7CF29A) } else if fps >= 30.0 { rgb(0xFFD36E) } else { rgb(0xFF6E6E) };
+    let good = |fps: f32| {
+        if fps >= 55.0 {
+            rgb(0x7CF29A)
+        } else if fps >= 30.0 {
+            rgb(0xFFD36E)
+        } else {
+            rgb(0xFF6E6E)
+        }
+    };
     let (x, y) = (8.0, 8.0);
     rrect(x, y, 222.0, 100.0, 8.0, rgba(PANEL, 0.62));
     let w = f.text(&format!("{fps:.0}"), x + 9.0, y + 4.0, 20.0, good(fps), Align::Left);
@@ -285,7 +310,10 @@ fn stats(app: &App) {
         for (i, m) in st.frames.iter().rev().take(90).rev().enumerate() {
             let hh = (m / 33.3).min(1.0) * gh;
             let c = good(1000.0 / m.max(0.1));
-            ffi::DrawRectangleRec(Rectangle { x: gx + (start + i) as f32 * bw, y: gy + gh - hh, width: bw.max(1.0), height: hh }, rgba(c, 0.85));
+            ffi::DrawRectangleRec(
+                Rectangle { x: gx + (start + i) as f32 * bw, y: gy + gh - hh, width: bw.max(1.0), height: hh },
+                rgba(c, 0.85),
+            );
         }
         ffi::DrawRectangleRec(Rectangle { x: gx, y: gy + gh * 0.5, width: gw, height: 1.0 }, rgba(rgb(0xFFFFFF), 0.3));
     }

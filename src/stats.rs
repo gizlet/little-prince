@@ -110,7 +110,10 @@ fn sample() -> Sample {
     let mut s = Sample { cores: cores(), ..Default::default() };
     if let Ok(m) = std::fs::read_to_string("/proc/meminfo") {
         let kb = |key: &str| {
-            m.lines().find(|l| l.starts_with(key)).and_then(|l| l.split_whitespace().nth(1)).and_then(|v| v.parse::<f32>().ok())
+            m.lines()
+                .find(|l| l.starts_with(key))
+                .and_then(|l| l.split_whitespace().nth(1))
+                .and_then(|v| v.parse::<f32>().ok())
         };
         s.mem_total_mb = kb("MemTotal:").map(|v| v / 1024.0);
         s.mem_free_mb = kb("MemAvailable:").map(|v| v / 1024.0);
@@ -131,7 +134,12 @@ fn ticks() -> Option<Ticks> {
     unsafe {
         let mut info: libc::host_cpu_load_info = std::mem::zeroed();
         let mut count = (std::mem::size_of::<libc::host_cpu_load_info>() / 4) as libc::mach_msg_type_number_t;
-        let r = libc::host_statistics(libc::mach_host_self(), libc::HOST_CPU_LOAD_INFO, &mut info as *mut _ as _, &mut count);
+        let r = libc::host_statistics(
+            libc::mach_host_self(),
+            libc::HOST_CPU_LOAD_INFO,
+            &mut info as *mut _ as _,
+            &mut count,
+        );
         if r != 0 {
             return None;
         }
@@ -155,18 +163,24 @@ fn sample() -> Sample {
         let page = libc::sysconf(libc::_SC_PAGESIZE) as f64;
         let mut vm: libc::vm_statistics64 = std::mem::zeroed();
         let mut count = libc::HOST_VM_INFO64_COUNT;
-        if libc::host_statistics64(libc::mach_host_self(), libc::HOST_VM_INFO64, &mut vm as *mut _ as _, &mut count) == 0 {
+        if libc::host_statistics64(libc::mach_host_self(), libc::HOST_VM_INFO64, &mut vm as *mut _ as _, &mut count)
+            == 0
+        {
             let free = (vm.free_count as f64 + vm.inactive_count as f64 + vm.purgeable_count as f64) * page;
             s.mem_free_mb = Some((free / 1048576.0) as f32);
         }
         let mut total: u64 = 0;
         let mut len = std::mem::size_of::<u64>();
-        if libc::sysctlbyname(c"hw.memsize".as_ptr(), &mut total as *mut u64 as _, &mut len, std::ptr::null_mut(), 0) == 0 {
+        if libc::sysctlbyname(c"hw.memsize".as_ptr(), &mut total as *mut u64 as _, &mut len, std::ptr::null_mut(), 0)
+            == 0
+        {
             s.mem_total_mb = Some((total as f64 / 1048576.0) as f32);
         }
         let mut info: libc::mach_task_basic_info = std::mem::zeroed();
         let mut count = (std::mem::size_of::<libc::mach_task_basic_info>() / 4) as libc::mach_msg_type_number_t;
-        if libc::task_info(libc::mach_task_self(), libc::MACH_TASK_BASIC_INFO, &mut info as *mut _ as _, &mut count) == 0 {
+        if libc::task_info(libc::mach_task_self(), libc::MACH_TASK_BASIC_INFO, &mut info as *mut _ as _, &mut count)
+            == 0
+        {
             s.mem_self_mb = Some((info.resident_size as f64 / 1048576.0) as f32);
         }
     }
@@ -217,4 +231,3 @@ mod tests {
         }
     }
 }
-

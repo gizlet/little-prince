@@ -146,10 +146,18 @@ impl FrameTimer {
                 let n = p.frames as f64;
                 let total = (now - p.since) / n * 1000.0;
                 let parts: Vec<String> = p.stages.iter().map(|(s, t)| format!("{s} {:.1}", t / n * 1000.0)).collect();
-                let lod: Vec<String> = p.tris.iter().map(|(s, c)| format!("{s} {}k", c / p.frames as u64 / 1000)).collect();
+                let lod: Vec<String> =
+                    p.tris.iter().map(|(s, c)| format!("{s} {}k", c / p.frames as u64 / 1000)).collect();
                 let draws = p.draws / p.frames as u64;
                 // Keep the existing report format consumed by profiling scripts.
-                eprintln!("prof: {:.1} fps {:.1} ms | {} | {} | {} draws {draws}k", 1000.0 / total, total, parts.join(" · "), describe(tris), lod.join(" "));
+                eprintln!(
+                    "prof: {:.1} fps {:.1} ms | {} | {} | {} draws {draws}k",
+                    1000.0 / total,
+                    total,
+                    parts.join(" · "),
+                    describe(tris),
+                    lod.join(" ")
+                );
                 p.tris.clear();
                 p.stages.clear();
                 p.draws = 0;

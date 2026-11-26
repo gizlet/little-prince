@@ -74,7 +74,8 @@ impl Builder {
             }
             key[6] = self.uv[v * 2].to_bits();
             key[7] = self.uv[v * 2 + 1].to_bits();
-            key[8] = u32::from_le_bytes([self.col[v * 4], self.col[v * 4 + 1], self.col[v * 4 + 2], self.col[v * 4 + 3]]);
+            key[8] =
+                u32::from_le_bytes([self.col[v * 4], self.col[v * 4 + 1], self.col[v * 4 + 2], self.col[v * 4 + 3]]);
             let id = match seen.get(&key) {
                 Some(&id) => id,
                 None => {
@@ -96,7 +97,11 @@ impl Builder {
     }
 
     pub fn tris(&self) -> usize {
-        if self.idx.is_empty() { self.pos.len() / 9 } else { self.idx.len() / 3 }
+        if self.idx.is_empty() {
+            self.pos.len() / 9
+        } else {
+            self.idx.len() / 3
+        }
     }
 
     /// `n` copies of this shape, copy `i` tagged with `u = i` (see `gl::Rig`).
@@ -181,7 +186,13 @@ pub fn cluster(pos: &[f32], idx: &[u16], cell: f32) -> Vec<u16> {
             continue;
         }
         // The same triangle twice (in any rotation) is drawn once.
-        let k = if a < b && a < c { [a, b, c] } else if b < c { [b, c, a] } else { [c, a, b] };
+        let k = if a < b && a < c {
+            [a, b, c]
+        } else if b < c {
+            [b, c, a]
+        } else {
+            [c, a, b]
+        };
         if seen.insert(k) {
             out.extend_from_slice(&[a, b, c]);
         }
@@ -283,7 +294,15 @@ pub fn planet(subdiv: u32, height: &dyn Fn(V3) -> f32, colour: &dyn Fn(V3, f32) 
 }
 
 /// An ellipsoid at `c` with the three semi-axes `axes` (as vectors).
-pub fn ellipsoid(b: &mut Builder, c: V3, axes: [V3; 3], subdiv: u32, col: &dyn Fn(V3) -> Color, sway: Sway, smooth: bool) {
+pub fn ellipsoid(
+    b: &mut Builder,
+    c: V3,
+    axes: [V3; 3],
+    subdiv: u32,
+    col: &dyn Fn(V3) -> Color,
+    sway: Sway,
+    smooth: bool,
+) {
     if let Some(lo) = b.lo.as_deref_mut() {
         ellipsoid(lo, c, axes, subdiv.saturating_sub(1), col, sway, smooth);
     }
@@ -303,7 +322,16 @@ pub fn ellipsoid(b: &mut Builder, c: V3, axes: [V3; 3], subdiv: u32, col: &dyn F
 /// A smooth ring-to-ring section along `up` from (`y0`, `r0`) to (`y1`,
 /// `r1`); a zero `r1` makes a cone. `cap` closes the ends.
 #[allow(clippy::too_many_arguments)]
-pub fn frustum(b: &mut Builder, base: V3, up: V3, sides: usize, seg: (f32, f32, f32, f32), col: Color, sway: Sway, cap: bool) {
+pub fn frustum(
+    b: &mut Builder,
+    base: V3,
+    up: V3,
+    sides: usize,
+    seg: (f32, f32, f32, f32),
+    col: Color,
+    sway: Sway,
+    cap: bool,
+) {
     if let Some(lo) = b.lo.as_deref_mut() {
         frustum(lo, base, up, (sides / 2).max(3), seg, col, sway, cap);
     }
@@ -363,7 +391,14 @@ pub fn cuboid(b: &mut Builder, c: V3, axes: [V3; 3], col: Color) {
 /// Blades of grass over the ground, avoiding directions where `keep` is
 /// false. Each blade is two crossed triangles; `u` is the sway weight, `v` a
 /// phase. Normals point up from the planet so blades light like the ground.
-pub fn grass(rng: &mut Rng, count: usize, height: &dyn Fn(V3) -> f32, keep: &dyn Fn(V3) -> bool, size: (f32, f32), palette: &[Color]) -> Builder {
+pub fn grass(
+    rng: &mut Rng,
+    count: usize,
+    height: &dyn Fn(V3) -> f32,
+    keep: &dyn Fn(V3) -> bool,
+    size: (f32, f32),
+    palette: &[Color],
+) -> Builder {
     let mut b = Builder::default();
     let mut placed = 0;
     let mut tries = 0;
@@ -491,12 +526,23 @@ pub fn tiles([ground, props, props_lo, flowers, grass]: [Builder; 5], layers: Ti
             close.append(&s);
             near.append_thinned_grass(&s);
         }
-        let ang = close.pos.chunks(3).map(|q| v3(q[0], q[1], q[2]).norm().dot(dir).clamp(-1.0, 1.0).acos()).fold(0.0, f32::max);
+        let ang = close
+            .pos
+            .chunks(3)
+            .map(|q| v3(q[0], q[1], q[2]).norm().dot(dir).clamp(-1.0, 1.0).acos())
+            .fold(0.0, f32::max);
         let mut mid = g.clone();
         if layers.props {
             mid.append(&l);
         }
-        out.push(Tile { dir, ang, close: close.indexed().upload(), near: near.indexed().upload(), mid: mid.indexed().upload(), far: g.indexed().upload() });
+        out.push(Tile {
+            dir,
+            ang,
+            close: close.indexed().upload(),
+            near: near.indexed().upload(),
+            mid: mid.indexed().upload(),
+            far: g.indexed().upload(),
+        });
     }
     out
 }
@@ -554,7 +600,15 @@ impl Kit {
             singles.push(single);
         }
         rigs[BALL].coarse = Some((COARSE_BALL, 0.05));
-        Kit { ball: singles[BALL], cone: singles[1], stub: singles[2], tube: singles[3], cube: singles[4], taper: singles[6], rigs }
+        Kit {
+            ball: singles[BALL],
+            cone: singles[1],
+            stub: singles[2],
+            tube: singles[3],
+            cube: singles[4],
+            taper: singles[6],
+            rigs,
+        }
     }
 
     /// A tapering limb from `a` (radius `r0`) to `b` (radius `r1`), with round ends.

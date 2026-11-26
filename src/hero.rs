@@ -81,7 +81,11 @@ fn blend(a: &Transform, b: &Transform, k: f32) -> Transform {
     let q = ffi::Quaternion { x: l(qa.x, qb.x), y: l(qa.y, qb.y), z: l(qa.z, qb.z), w: l(qa.w, qb.w) };
     let n = (q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w).sqrt().max(1e-6);
     Transform {
-        translation: ffi::Vector3 { x: l(a.translation.x, b.translation.x), y: l(a.translation.y, b.translation.y), z: l(a.translation.z, b.translation.z) },
+        translation: ffi::Vector3 {
+            x: l(a.translation.x, b.translation.x),
+            y: l(a.translation.y, b.translation.y),
+            z: l(a.translation.z, b.translation.z),
+        },
         rotation: ffi::Quaternion { x: q.x / n, y: q.y / n, z: q.z / n, w: q.w / n },
         scale: ffi::Vector3 { x: l(a.scale.x, b.scale.x), y: l(a.scale.y, b.scale.y), z: l(a.scale.z, b.scale.z) },
     }
@@ -192,7 +196,11 @@ impl Hero {
             for m in 0..model.meshCount as usize {
                 let mesh = *model.meshes.add(m);
                 let n = mesh.vertexCount as usize;
-                if mesh.boneIndices.is_null() || mesh.boneWeights.is_null() || mesh.texcoords.is_null() || mesh.normals.is_null() {
+                if mesh.boneIndices.is_null()
+                    || mesh.boneWeights.is_null()
+                    || mesh.texcoords.is_null()
+                    || mesh.normals.is_null()
+                {
                     continue;
                 }
                 let bi = std::slice::from_raw_parts(mesh.boneIndices, n * 4);
@@ -299,7 +307,11 @@ impl Hero {
             return;
         }
         // Start a walk or run on the same foot the last one ended on.
-        let t = if looped && self.cur.looped { self.cur.t / self.duration(self.cur.anim) * self.duration(anim) } else { 0.0 };
+        let t = if looped && self.cur.looped {
+            self.cur.t / self.duration(self.cur.anim) * self.duration(anim)
+        } else {
+            0.0
+        };
         self.prev = Some((self.cur, 0.0));
         self.cur = Track { anim, t, rate, looped };
     }
@@ -390,7 +402,9 @@ impl Hero {
             (ffi::RL_DEFAULT_SHADER_ATTRIB_LOCATION_POSITION, self.out_pos.as_slice()),
             (ffi::RL_DEFAULT_SHADER_ATTRIB_LOCATION_NORMAL, self.out_nrm.as_slice()),
         ] {
-            unsafe { ffi::UpdateMeshBuffer(mesh, slot as i32, data.as_ptr().cast(), std::mem::size_of_val(data) as i32, 0) };
+            unsafe {
+                ffi::UpdateMeshBuffer(mesh, slot as i32, data.as_ptr().cast(), std::mem::size_of_val(data) as i32, 0)
+            };
         }
     }
 
@@ -425,7 +439,10 @@ impl Hero {
             let mut worst = 0.0f32;
             for b in 0..self.bones {
                 let r = *self.model.boneMatrices.add(b);
-                let theirs = [r.m0, r.m1, r.m2, r.m3, r.m4, r.m5, r.m6, r.m7, r.m8, r.m9, r.m10, r.m11, r.m12, r.m13, r.m14, r.m15];
+                let theirs = [
+                    r.m0, r.m1, r.m2, r.m3, r.m4, r.m5, r.m6, r.m7, r.m8, r.m9, r.m10, r.m11, r.m12, r.m13, r.m14,
+                    r.m15,
+                ];
                 for c in 0..4 {
                     for rr in 0..4 {
                         worst = worst.max((self.palette[b * 4 + c][rr] - theirs[c * 4 + rr]).abs());
@@ -440,5 +457,7 @@ impl Hero {
 /// The animation names in the file, for debugging.
 #[allow(dead_code)]
 pub fn names(h: &Hero) -> Vec<String> {
-    (0..h.count).map(|i| unsafe { CStr::from_ptr((*h.anims.add(i)).name.as_ptr()) }.to_string_lossy().into_owned()).collect()
+    (0..h.count)
+        .map(|i| unsafe { CStr::from_ptr((*h.anims.add(i)).name.as_ptr()) }.to_string_lossy().into_owned())
+        .collect()
 }

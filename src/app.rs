@@ -5,9 +5,9 @@
 
 use crate::fx::{Burst, Fx};
 use crate::gl::{self, lighten, mix, rgb, rgba, Gl, Ink, Lighting, Post, Sprites};
+use crate::hero::{Hero, Motion};
 use crate::input::{Button, Controls};
 use crate::math::{any_perp, approach3, clamp01, place, smooth, v3, Rng, V3};
-use crate::hero::{Hero, Motion};
 use crate::mesh::Kit;
 use crate::player::{Ev, Player, SPEED};
 use crate::sound::{Sfx, Sounds};
@@ -132,7 +132,11 @@ impl App {
             hud: true,
             hero: Hero::load(&std::env::var("LITTLEPRINCE_HERO").unwrap_or_else(|_| HERO.to_string())),
             closeup: false,
-            fx_level: std::env::var("LITTLEPRINCE_FX").ok().and_then(|v| v.parse().ok()).unwrap_or(if cfg!(feature = "gizlet-os") { 1 } else { 2 }).min(2),
+            fx_level: std::env::var("LITTLEPRINCE_FX")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(if cfg!(feature = "gizlet-os") { 1 } else { 2 })
+                .min(2),
             autoplay: false,
             quit_hold: 0.0,
             quit: false,
@@ -330,7 +334,12 @@ impl App {
             }
         }
         self.player_effects();
-        let motion = Motion { speed: sp, grounded: self.player.grounded, flying: self.mode == Mode::Fly, cheer: self.player.cheer };
+        let motion = Motion {
+            speed: sp,
+            grounded: self.player.grounded,
+            flying: self.mode == Mode::Fly,
+            cheer: self.player.cheer,
+        };
         if let Some(h) = &mut self.hero {
             h.update(dt, &motion);
         }
@@ -401,17 +410,21 @@ impl App {
                     self.fx.ring(p, up, 0.4 + k * 0.3, 0.5, rgba(dust, 0.8));
                     if self.player.reach_target > 0.5 || speed > 3.0 {
                         self.fx.ring(p, up, 1.4, 1.0, accent);
-                        self.fx.burst(p, up, Burst {
-                            n: 30,
-                            speed: (0.5, 1.8),
-                            size: (0.03, 0.08),
-                            life: (0.7, 1.5),
-                            cols: &[accent, lighten(accent, 0.6), rgb(0xFFFFFF)],
-                            glow: true,
-                            grav: 0.8,
-                            drag: 1.6,
-                            aim: 0.5,
-                        });
+                        self.fx.burst(
+                            p,
+                            up,
+                            Burst {
+                                n: 30,
+                                speed: (0.5, 1.8),
+                                size: (0.03, 0.08),
+                                life: (0.7, 1.5),
+                                cols: &[accent, lighten(accent, 0.6), rgb(0xFFFFFF)],
+                                glow: true,
+                                grav: 0.8,
+                                drag: 1.6,
+                                aim: 0.5,
+                            },
+                        );
                         self.snd.play(Sfx::Chime(2), 1.0, 0.4);
                     }
                     self.fx.shake = self.fx.shake.max(k * 0.15);
@@ -454,7 +467,11 @@ impl App {
                 (pos, target, rate.max(if self.look_t < 0.3 { 12.0 } else { 0.0 }))
             }
             Mode::Fly => {
-                let k = if self.mode_t < LEAVE { self.mode_t / LEAVE } else { 1.0 - clamp01((self.mode_t - LEAVE) / ARRIVE) };
+                let k = if self.mode_t < LEAVE {
+                    self.mode_t / LEAVE
+                } else {
+                    1.0 - clamp01((self.mode_t - LEAVE) / ARRIVE)
+                };
                 (p + n * (0.95 + k * 0.9) - f * (2.0 + k * 1.2), p + n * (0.5 + 0.2 * k), 60.0)
             }
         };
@@ -469,7 +486,8 @@ impl App {
         let n = self.player.n;
         let f = self.player.face;
         let r = self.player.right();
-        let hand = if self.hero.is_some() { Hero::crown(&self.player.pose_frame(), HERO_H) } else { self.player.hands_up() };
+        let hand =
+            if self.hero.is_some() { Hero::crown(&self.player.pose_frame(), HERO_H) } else { self.player.hands_up() };
         (0..BIRDS)
             .map(|i| {
                 let i = i as f32;
@@ -493,10 +511,22 @@ impl App {
             let flap = (self.t * 11.0 + i as f32).sin();
             let k = k * 1.7;
             g.part(self.kit.ball, place(pos, n, fwd, v3(0.02, 0.018, 0.045) * k), white, 0.1, Ink::Radial);
-            g.part(self.kit.cone, place(pos + fwd * 0.04 * k, fwd, n, v3(0.008, 0.02, 0.008) * k), rgb(0xF2B04E), 0.0, Ink::None);
+            g.part(
+                self.kit.cone,
+                place(pos + fwd * 0.04 * k, fwd, n, v3(0.008, 0.02, 0.008) * k),
+                rgb(0xF2B04E),
+                0.0,
+                Ink::None,
+            );
             for side in [-1.0f32, 1.0] {
                 let wd = (fwd.cross(n) * side + n * flap * 0.9).norm();
-                g.part(self.kit.ball, place(pos + wd * 0.038 * k, wd, fwd, v3(0.01, 0.042, 0.022) * k), white, 0.1, Ink::Radial);
+                g.part(
+                    self.kit.ball,
+                    place(pos + wd * 0.038 * k, wd, fwd, v3(0.01, 0.042, 0.022) * k),
+                    white,
+                    0.1,
+                    Ink::Radial,
+                );
             }
         }
     }
@@ -506,7 +536,8 @@ impl App {
         if k < 0.01 {
             return;
         }
-        let hand = if self.hero.is_some() { Hero::crown(&self.player.pose_frame(), HERO_H) } else { self.player.hands_up() };
+        let hand =
+            if self.hero.is_some() { Hero::crown(&self.player.pose_frame(), HERO_H) } else { self.player.hands_up() };
         let c = rgba(ink, 0.7 * k);
         unsafe {
             ffi::rlBegin(ffi::RL_LINES as i32);
@@ -682,7 +713,12 @@ fn draw_backdrop(cam: V3, fwd: V3, right: V3, up: V3, fovy: f32, top: Color, bot
         ffi::rlDisableBackfaceCulling();
         ffi::rlSetTexture(0);
         ffi::rlBegin(ffi::RL_QUADS as i32);
-        for (p, col) in [(c - right * w + up * h, top), (c - right * w - up * h, bottom), (c + right * w - up * h, bottom), (c + right * w + up * h, top)] {
+        for (p, col) in [
+            (c - right * w + up * h, top),
+            (c - right * w - up * h, bottom),
+            (c + right * w - up * h, bottom),
+            (c + right * w + up * h, top),
+        ] {
             ffi::rlColor4ub(col.r, col.g, col.b, 255);
             ffi::rlVertex3f(p.x, p.y, p.z);
         }
@@ -693,5 +729,15 @@ fn draw_backdrop(cam: V3, fwd: V3, right: V3, up: V3, fovy: f32, top: Color, bot
 }
 
 fn puff(n: usize, cols: &[Color; 2], speed: f32) -> Burst<'_> {
-    Burst { n, speed: (0.3 * speed, 0.9 * speed), size: (0.04, 0.08), life: (0.4, 0.8), cols, glow: false, grav: 1.5, drag: 3.0, aim: 0.55 }
+    Burst {
+        n,
+        speed: (0.3 * speed, 0.9 * speed),
+        size: (0.04, 0.08),
+        life: (0.4, 0.8),
+        cols,
+        glow: false,
+        grav: 1.5,
+        drag: 3.0,
+        aim: 0.55,
+    }
 }

@@ -107,7 +107,8 @@ fn main() {
             ffi::InitAudioDevice();
             ffi::IsAudioDeviceReady()
         };
-    let lang = if std::env::var("GIZLET_LANG").is_ok_and(|v| v.starts_with("en")) { text::Lang::En } else { text::Lang::Zh };
+    let lang =
+        if std::env::var("GIZLET_LANG").is_ok_and(|v| v.starts_with("en")) { text::Lang::En } else { text::Lang::Zh };
     let zoom = view().1.max(1.0);
     let mut controls = input::Controls::new();
     let mut app = App::new(lang, zoom, audio);
@@ -152,7 +153,12 @@ fn main() {
         }
         prof::mark("post");
         unsafe {
-            ffi::BeginMode2D(Camera2D { offset: Vector2 { x: dest.x, y: dest.y }, target: Vector2 { x: 0.0, y: 0.0 }, rotation: 0.0, zoom: k });
+            ffi::BeginMode2D(Camera2D {
+                offset: Vector2 { x: dest.x, y: dest.y },
+                target: Vector2 { x: 0.0, y: 0.0 },
+                rotation: 0.0,
+                zoom: k,
+            });
         }
         if app.hud {
             hud::draw(&app);
@@ -177,7 +183,9 @@ fn main() {
         unsafe { ffi::EndDrawing() };
         prof::mark("swap");
         if let Some(frame) = frame {
-            frame.finish(|tris| format!("{:?} fx{} parts{} tris{}k", app.world().kind, app.fx_level, app.fx.count(), tris / 1000));
+            frame.finish(|tris| {
+                format!("{:?} fx{} parts{} tris{}k", app.world().kind, app.fx_level, app.fx.count(), tris / 1000)
+            });
         }
     }
     unsafe { ffi::CloseWindow() };
