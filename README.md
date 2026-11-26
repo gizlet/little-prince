@@ -1,6 +1,6 @@
 # The Little Prince · 小王子
 
-A 3D game for [Gizlet OS](https://github.com/gizlet/os) handhelds such as the R36S, written in Rust with raylib. A small hooded traveller walks three tiny planets, each lit by its own sun and turning through day, sunset and night, and migrating birds carry it from one planet to the next. It shows what a 1.3 GHz quad-core Cortex-A35 with a Mali-G31 can draw on a 640×480 screen, and grows a little at a time.
+A 3D game for [Gizlet OS](https://github.com/gizlet/os) handhelds such as the R36S, written in Rust with raylib. A small hooded traveller walks three small planets, each lit by its own sun and turning through day, sunset and night, and migrating birds carry it from one planet to the next. It shows what a 1.3 GHz quad-core Cortex-A35 with a Mali-G31 can draw on a 640×480 screen, and grows a little at a time: [docs/design.md](docs/design.md) describes the adventure it is becoming.
 
 ![B612](docs/screenshots/b612.png)
 
@@ -18,9 +18,9 @@ A 3D game for [Gizlet OS](https://github.com/gizlet/os) handhelds such as the R3
 
 | | |
 | --- | --- |
-| B612 | A planet nine units across with rolling hills, a dirt path, 20,000 blades of grass parting around the hero, flowers, bushes, mossy rocks, a baobab, smoking volcanoes, the rose under its glass, clouds and butterflies. Pull up the baobab sprouts. |
-| The lamplighter's planet | A day lasts 14 seconds. The lamplighter lights his lamp at dusk and puts it out at dawn; the HUD counts the sunsets you watch. |
-| The desert | Dunes, a wheat field, a crashed biplane and a fox that comes a little closer each time you stand still. |
+| B612 | A planet 18 units in radius with rolling hills, a dirt path, 30,000 blades of grass parting around the hero, flowers, bushes, mossy rocks, three baobabs, smoking volcanoes, the rose under its glass, clouds and butterflies. Pull up the baobab sprouts. |
+| The lamplighter's planet | The smallest, 15 units in radius, stony and bare, where a day lasts 14 seconds. The lamplighter lights his lamp at dusk and puts it out at dawn; the HUD counts the sunsets you watch. |
+| The desert | Earth, the largest at 25 units in radius: dunes, a wheat field, a crashed biplane and a fox that comes a little closer each time you stand still. |
 | The hero | KayKit's rig with idle, walk, run, jump, landing and cheer, blended into each other and timed to the hero's speed, skinned on the GPU. |
 | The look | Toon lighting with soft shadow colours, ink outlines, a sun that circles each planet, stars and shooting stars, fog, bloom and a paper texture at the high effects level. |
 | The HUD | FPS with a frame-time graph, whole-machine and own CPU use, free and total memory, the app's memory, SoC temperature and CPU clock. |
@@ -63,6 +63,7 @@ Left alone on the title for 12 seconds, it plays by itself (autoplay) and moves 
 | `LITTLEPRINCE_PROFILE=1` | Print the frame time per stage (waiting for the GPU after each) and the triangles drawn, every 3 seconds; `2` prints only the frame time |
 | `LITTLEPRINCE_SKIP=hero,heroink,skin,world,grass,props,flowers,backdrop,sky,alpha,glass,glow,bloom` | Leave parts out, for measuring their cost |
 | `LITTLEPRINCE_FPS=60` | Frame rate cap; `0` leaves the pace to the display |
+| `LITTLEPRINCE_SECONDS=80` | Quit after that many seconds, for scripted runs |
 | `LITTLEPRINCE_CAPTURE=FILE.png` | Render one frame to a PNG and exit; `LITTLEPRINCE_SCENE` is `title`, `b612`, `lamp`, `desert`, `fly`, `model` or `icon`, and `LITTLEPRINCE_AT` the seconds of autoplay before it |
 
 ```sh
@@ -90,17 +91,17 @@ dispatching CI also starts a release.
 
 ### Performance on the R36S
 
-On a genuine R36S (RK3326, Mali-G31 through Panfrost, Mesa 25.0) B612 runs at about 50 fps at the default (mid) effects level, with about 45,000 triangles in about 50 draw calls a frame and about 140 MB of memory. The main thread spends about 14 ms of CPU time per frame, so the GPU sets the pace: its fragment stage is busy about 85% of the time. The high effects level (bloom, paper, the hero's outline) runs at about 36 fps.
+On a genuine R36S (RK3326, Mali-G31 through Panfrost, Mesa 25.0) version 0.2's B612 ran at about 50 fps at the default (mid) effects level, with about 45,000 triangles in about 50 draw calls a frame and about 140 MB of memory; with the bigger planets the desktop draws about as many triangles and draw calls while walking. The main thread spends about 14 ms of CPU time per frame, so the GPU sets the pace: its fragment stage is busy about 85% of the time. The high effects level (bloom, paper, the hero's outline) runs at about 36 fps.
 
 On this GPU every triangle costs fragment time, however few pixels it covers: drawing the hero at a quarter of its size saves only about a third of its cost, and drawing half its triangles saves half. So the hero's outline uses a reduced copy of its mesh (about 1,800 triangles instead of 4,000, merged on a grid over the same skinned vertices), and planet cells more than 3 units from the camera carry every other blade of grass. Swapping the hero's shader for a flat one, mipmapping its texture or discarding depth buffers at the end of each pass made no measurable difference.
 
 The biggest single win was giving raylib's render batch 48 buffers in rotation instead of one (`rlLoadRenderBatch`, set with `LITTLEPRINCE_BATCH`). With one buffer, every batch flush rewrites a vertex buffer the GPU is still reading, and Panfrost makes the CPU wait for the GPU each time: about 25 ms a frame went to those waits, and the game ran at 22 fps. The hero's skinned mesh is double-buffered for the same reason.
 
-Other changes that helped: batching small character parts into a few draw calls, indexed meshes, cheaper small parts and far-away scenery, lighting scenery per vertex without rim light, splitting each planet into 80 cells that hold their ground, scenery, flowers and grass in one mesh each (in full nearby, coarser farther off, ground only beyond), drawn nearest first and only when in front of the camera and above the horizon, skinning the hero on the CPU, drawing straight to the screen below the high effects level, drawing opaque things without blending, the sky after the solids, and a HUD redrawn four times a second and blitted only where it holds something.
+Other changes that helped: batching small character parts into a few draw calls, indexed meshes, cheaper small parts and far-away scenery, lighting scenery per vertex without rim light, splitting each planet into 80 cells that hold their ground, scenery, flowers and grass in one mesh each (in full nearby, coarser farther off, ground only beyond; 320 cells since the planets grew, whose levels share one vertex and one index buffer, and groups of four far-away cells drawn as one), drawn nearest first and only when in front of the camera and above the horizon, skinning the hero on the CPU, drawing straight to the screen below the high effects level, drawing opaque things without blending, the sky after the solids, and a HUD redrawn four times a second and blitted only where it holds something.
 
-`LITTLEPRINCE_PROFILE=2` prints the frame time, the CPU time before the frame is handed over (`cpu`) and the main thread's CPU time (`thread-cpu`); `1` also splits it into stages, waiting for the GPU after each; `3` splits it without waiting. `LITTLEPRINCE_SKIP` leaves parts out to measure their cost; reading the GPU busy time from `/proc/PID/fdinfo` (with `/sys/bus/platform/drivers/panfrost/*/profiling` set to 1) shows what each part costs the GPU.
+`LITTLEPRINCE_PROFILE=2` prints the frame time, the triangles, the peak triangles and draw calls in each three-second window, the CPU time before the frame is handed over (`cpu`) and the main thread's CPU time (`thread-cpu`); `1` also splits it into stages, waiting for the GPU after each; `3` splits it without waiting. `LITTLEPRINCE_SKIP` leaves parts out to measure their cost; reading the GPU busy time from `/proc/PID/fdinfo` (with `/sys/bus/platform/drivers/panfrost/*/profiling` set to 1) shows what each part costs the GPU.
 
-The sky backdrop and the stars are drawn 26–30 units from the camera, well inside the far plane: on the handheld's depth buffer things near the far plane can fail the depth test and the sky flickers black.
+The sky backdrop and the stars are drawn just beyond the farthest ground the camera can see and no nearer than 26 units, well inside the far plane: on the handheld's depth buffer things near the far plane can fail the depth test and the sky flickers black.
 
 Do not pin the GPU clock by hand: setting `min_freq` of `/sys/class/devfreq/ff400000.gpu` to its top frequency made the GPU power domain fail (`failed to get ack on domain 'gpu'`) and the screen went black until a reboot. The default `simple_ondemand` governor already reaches 560 MHz under load.
 
@@ -111,6 +112,7 @@ Do not pin the GPU clock by hand: setting `min_freq` of `/sys/class/devfreq/ff40
 | `gizlet.toml` | The app manifest |
 | `src/main.rs` | The window, the frame loop, captures |
 | `src/app.rs` | Modes, the follow camera, autoplay, flights between planets, effects from footsteps and landings, the render order |
+| `docs/design.md` | The game design and its milestones |
 | `src/world.rs` | The three planets: ground, scenery, the rose, sprouts, volcanoes, the lamplighter, the fox, the biplane, sky and stars |
 | `src/hero.rs` | Loading the KayKit model, animation blending, bone matrices |
 | `src/player.rs` | Walking on a sphere, jumps, the procedural prince used when no model is found |
