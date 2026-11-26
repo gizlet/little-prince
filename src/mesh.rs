@@ -367,8 +367,13 @@ pub fn grass(rng: &mut Rng, count: usize, height: &dyn Fn(V3) -> f32, keep: &dyn
             let root_c = crate::gl::scale(c, 0.62);
             let tip_c = crate::gl::lighten(c, 0.3);
             for side in [t, t.rotate(n, 1.57)] {
+                // Both windings, so blades show from either side with face
+                // culling on and can share a draw call with the ground.
                 b.push(root - side * w, n, (0.0, phase), root_c);
                 b.push(root + side * w, n, (0.0, phase), root_c);
+                b.push(tip, n, (1.0, phase), tip_c);
+                b.push(root + side * w, n, (0.0, phase), root_c);
+                b.push(root - side * w, n, (0.0, phase), root_c);
                 b.push(tip, n, (1.0, phase), tip_c);
             }
         }
@@ -376,20 +381,24 @@ pub fn grass(rng: &mut Rng, count: usize, height: &dyn Fn(V3) -> f32, keep: &dyn
     b
 }
 
-/// A piece of a static mesh: the triangles nearest one of 80 directions
-/// around the planet, so whole pieces can be skipped when out of view.
-pub struct Chunk {
+/// One of 80 cells of a planet, holding everything static in it at three
+/// levels of detail, each a single mesh and so a single draw call: `near`
+/// has the ground, the full scenery, flowers and grass; `mid` the ground and
+/// the coarser scenery; `far` the ground alone.
+pub struct Tile {
     pub dir: V3,
-    /// The angle from `dir` to the piece's farthest vertex.
+    /// The angle from `dir` to the cell's farthest vertex.
     pub ang: f32,
-    pub mesh: Mesh,
+    pub near: Mesh,
+    pub mid: Mesh,
+    pub far: Mesh,
 }
 
 impl Builder {
-    /// Splits the (unindexed) triangles into chunks by direction from the
-    /// planet's centre, indexing each chunk when `indexed`.
-    pub fn chunked(self, indexed: bool) -> Vec<Chunk> {
-        let centers: Vec<V3> = icosphere(1).iter().map(|f| (f[0] + f[1] + f[2]).norm()).collect();
+    /// Splits the (unindexed) triangles by which of the 80 cell directions
+    /// their centre is nearest; always 80 builders, some empty.
+    fn cells(self) -> Vec<Builder> {
+        let centers = cell_dirs();
         let mut parts: Vec<Builder> = vec![Builder::default(); centers.len()];
         let at = |v: usize| v3(self.pos[v * 3], self.pos[v * 3 + 1], self.pos[v * 3 + 2]);
         for t in 0..self.pos.len() / 9 {
@@ -404,16 +413,44 @@ impl Builder {
             }
         }
         parts
-            .into_iter()
-            .zip(centers)
-            .filter(|(b, _)| !b.pos.is_empty())
-            .map(|(b, dir)| {
-                let ang = b.pos.chunks(3).map(|q| v3(q[0], q[1], q[2]).norm().dot(dir).clamp(-1.0, 1.0).acos()).fold(0.0, f32::max);
-                let mesh = if indexed { b.indexed().upload() } else { b.upload() };
-                Chunk { dir, ang, mesh }
-            })
-            .collect()
     }
+
+    fn append(&mut self, o: &Builder) {
+        self.pos.extend(&o.pos);
+        self.nrm.extend(&o.nrm);
+        self.uv.extend(&o.uv);
+        self.col.extend(&o.col);
+    }
+}
+
+fn cell_dirs() -> Vec<V3> {
+    icosphere(1).iter().map(|f| (f[0] + f[1] + f[2]).norm()).collect()
+}
+
+/// Builds the planet's tiles from its ground, full and coarse scenery,
+/// flowers and grass (all unindexed, in world space).
+pub fn tiles(ground: Builder, props: Builder, props_lo: Builder, decor: Builder, grass: Builder) -> Vec<Tile> {
+    let mut g = ground.cells().into_iter();
+    let mut p = props.cells().into_iter();
+    let mut l = props_lo.cells().into_iter();
+    let mut d = decor.cells().into_iter();
+    let mut s = grass.cells().into_iter();
+    let mut out = Vec::new();
+    for dir in cell_dirs() {
+        let (g, p, l, d, s) = (g.next().unwrap(), p.next().unwrap(), l.next().unwrap(), d.next().unwrap(), s.next().unwrap());
+        if g.pos.is_empty() && p.pos.is_empty() && d.pos.is_empty() && s.pos.is_empty() {
+            continue;
+        }
+        let mut near = g.clone();
+        near.append(&p);
+        near.append(&d);
+        near.append(&s);
+        let ang = near.pos.chunks(3).map(|q| v3(q[0], q[1], q[2]).norm().dot(dir).clamp(-1.0, 1.0).acos()).fold(0.0, f32::max);
+        let mut mid = g.clone();
+        mid.append(&l);
+        out.push(Tile { dir, ang, near: near.indexed().upload(), mid: mid.indexed().upload(), far: g.indexed().upload() });
+    }
+    out
 }
 
 /// White unit shapes, coloured and placed at draw time.

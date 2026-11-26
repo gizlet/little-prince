@@ -15,10 +15,10 @@
 use crate::fx::{Burst, Fx, Particle};
 use crate::gl::{self, lighten, mix, rgb, rgba, Gl, Ink, Sprites};
 use crate::math::{any_perp, approach, place, smooth, v3, Frame, Rng, V3};
-use crate::mesh::{self, no_sway, Builder, Chunk, Kit};
+use crate::mesh::{self, no_sway, Builder, Kit, Tile};
 use crate::sound::{Sfx, Sounds};
 use crate::text::T;
-use raylib_sys::Color;
+use raylib_sys::{Color, Mesh};
 use std::f32::consts::{PI, TAU};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -30,6 +30,10 @@ pub enum Kind {
 
 pub const KINDS: [Kind; 3] = [Kind::B612, Kind::Lamp, Kind::Desert];
 const FOX_TRUST: usize = 5;
+/// Up to this far from the camera a cell has grass, flowers and full scenery;
+/// up to `MID` coarser scenery; beyond, only the ground.
+const NEAR: f32 = 6.0;
+const MID: f32 = 16.0;
 /// How far the stars, sun and moon are drawn from the camera.
 pub const SKY_D: f32 = 26.0;
 
@@ -366,11 +370,7 @@ pub struct World {
     sun0: V3,
     period: f32,
     pub spawn: V3,
-    ground: Vec<Chunk>,
-    props: Vec<Chunk>,
-    props_lo: Vec<Chunk>,
-    decor: Vec<Chunk>,
-    grass: Vec<Chunk>,
+    tiles: Vec<Tile>,
     clouds: Vec<(V3, V3, f32, f32)>,
     butterflies: Vec<(V3, f32, Color)>,
     volcanoes: Vec<Volcano>,
@@ -439,7 +439,8 @@ impl World {
             Kind::Desert => 5,
             Kind::Lamp => 4,
         };
-        let ground = mesh::planet(subdiv, &r, &|n, h| ground_colour(kind, n, h)).chunked(true);
+        let ground = mesh::planet(subdiv, &r, &|n, h| ground_colour(kind, n, h));
+        let grass;
         let mut stars: Vec<Star> = (0..360)
             .map(|_| Star { d: rng.dir(), size: rng.range(0.12, 0.42), phase: rng.range(0.0, TAU), col: rgb(0xE8EEFF) })
             .collect();
@@ -455,11 +456,7 @@ impl World {
             sun0,
             period,
             spawn,
-            ground,
-            props: Vec::new(),
-            props_lo: Vec::new(),
-            decor: Vec::new(),
-            grass: Vec::new(),
+            tiles: Vec::new(),
             clouds: Vec::new(),
             butterflies: Vec::new(),
             volcanoes: Vec::new(),
@@ -572,15 +569,14 @@ impl World {
                 }
                 let bare = taken.clone();
                 let keep = move |d: V3| path_dist(d) > 0.28 && bare.iter().all(|t| t.dot(d) < 0.99985);
-                w.grass = mesh::grass(&mut rng, 15000, r, &keep, (0.09, 0.21), &[
+                grass = mesh::grass(&mut rng, 15000, r, &keep, (0.09, 0.21), &[
                     rgb(0x5A8C3A),
                     rgb(0x6C9C42),
                     rgb(0x7FAD4C),
                     rgb(0x93BB58),
                     rgb(0x4D7A33),
                     rgb(0xA3B95A),
-                ])
-                .chunked(false);
+                ]);
                 for _ in 0..18 {
                     let d = rng.dir();
                     w.clouds.push((d, any_perp(d), rng.range(0.006, 0.014), rng.range(0.9, 1.6)));
@@ -615,11 +611,10 @@ impl World {
                     }
                 }
                 let bare = taken.clone();
-                w.grass = mesh::grass(&mut rng, 300, &r, &|d| bare.iter().all(|t| t.dot(d) < 0.993), (0.03, 0.07), &[
+                grass = mesh::grass(&mut rng, 300, &r, &|d| bare.iter().all(|t| t.dot(d) < 0.993), (0.03, 0.07), &[
                     rgb(0x8FB070),
                     rgb(0xA0BE7A),
-                ])
-                .chunked(false);
+                ]);
                 w.total = 44;
             }
             Kind::Desert => {
@@ -672,14 +667,12 @@ impl World {
                 }
                 let bare = taken.clone();
                 let field = move |d: V3| d.dot(wheat) > 0.982 && bare.iter().all(|t| t.dot(d) < 0.9993);
-                w.grass = mesh::grass(&mut rng, 1600, &r, &field, (0.1, 0.22), &[rgb(0xC99E48), rgb(0xB68C3C), rgb(0xD6B25A)]).chunked(false);
+                grass = mesh::grass(&mut rng, 1600, &r, &field, (0.1, 0.22), &[rgb(0xC99E48), rgb(0xB68C3C), rgb(0xD6B25A)]);
                 w.total = FOX_TRUST;
             }
         }
         let lo = props.lo.take().map(|b| *b).unwrap_or_default();
-        w.props = props.chunked(true);
-        w.props_lo = lo.chunked(true);
-        w.decor = decor.chunked(true);
+        w.tiles = mesh::tiles(ground, props, lo, decor, grass);
         w
     }
 
@@ -1057,45 +1050,41 @@ impl World {
         Sprites::end();
     }
 
-    /// The solid parts of the planet, queued for `Gl::flush`.
-    /// Whether chunk `c`, with things up to `h` tall on it, can be seen from
+    /// Whether a tile, with things up to `h` tall on it, can be seen from
     /// `cam` looking along `fwd`, within `far`: above the horizon, not behind
-    /// the camera, near enough.
-    fn visible(&self, c: &Chunk, cam: V3, fwd: V3, h: f32, far: f32) -> bool {
+    /// the camera, near enough. Returns its distance.
+    fn visible(&self, c: &Tile, cam: V3, fwd: V3, h: f32, far: f32) -> Option<f32> {
         let r = self.radius;
         let cd = cam.len().max(r + 0.01);
         let theta = c.dir.dot(cam * (1.0 / cd)).clamp(-1.0, 1.0).acos();
         let horizon = (r / cd).min(1.0).acos() + (r / (r + h)).min(1.0).acos();
         if theta - c.ang > horizon + 0.05 {
-            return false;
+            return None;
         }
         let wr = r * c.ang + h;
         let d = c.dir * r - cam;
-        d.len() - wr < far && d.dot(fwd) > -wr
+        (d.len() - wr < far && d.dot(fwd) > -wr).then(|| (d.len() - r * c.ang).max(0.0))
     }
 
     /// The solid parts of the planet, queued for `Gl::flush`.
     pub fn draw(&self, gl: &Gl, kit: &Kit, t: f32, cam: V3, fwd: V3) {
-        // No hull outline on the ground: it would cover the whole screen a second time.
-        for c in self.ground.iter().filter(|c| !crate::prof::skip("ground") && self.visible(c, cam, fwd, 1.0, 60.0)) {
-            crate::prof::tris("ground", c.mesh.triangleCount as u64);
-            gl.surface(c.mesh, Ink::None);
-        }
-        // Near chunks in full detail, far ones from the coarser copy. Both
-        // are split on the same cell directions, so each cell draws once.
-        let near = |c: &Chunk| (c.dir * self.radius - cam).len() < 6.0;
-        let far_ok = !crate::prof::skip("props");
-        for c in self.props.iter().filter(|c| far_ok && near(c) && self.visible(c, cam, fwd, 4.0, 16.0)) {
-            crate::prof::tris("props", c.mesh.triangleCount as u64);
-            gl.surface(c.mesh, Ink::None);
-        }
-        for c in self.props_lo.iter().filter(|c| far_ok && !near(c) && self.visible(c, cam, fwd, 4.0, 16.0)) {
-            crate::prof::tris("props-lo", c.mesh.triangleCount as u64);
-            gl.surface(c.mesh, Ink::None);
-        }
-        for c in self.decor.iter().filter(|c| !crate::prof::skip("flowers") && self.visible(c, cam, fwd, 0.3, 7.0)) {
-            crate::prof::tris("flowers", c.mesh.triangleCount as u64);
-            gl.surface(c.mesh, Ink::None);
+        // One draw call per visible cell: everything near in full, scenery
+        // farther off coarser, and only the ground beyond. Queued farthest
+        // first, because `flush` draws the queue backwards: near cells then
+        // hide what is behind them before it is shaded.
+        if !crate::prof::skip("world") {
+            let mut list: Vec<(f32, Mesh, &'static str)> = Vec::new();
+            for c in &self.tiles {
+                if let Some(d) = self.visible(c, cam, fwd, 4.0, 60.0) {
+                    let (m, name) = if d < NEAR { (c.near, "near") } else if d < MID { (c.mid, "mid") } else { (c.far, "far") };
+                    list.push((d, m, name));
+                }
+            }
+            list.sort_by(|a, b| b.0.total_cmp(&a.0));
+            for (_, m, name) in list {
+                crate::prof::tris(name, m.triangleCount as u64);
+                gl.surface(m, Ink::None);
+            }
         }
         let wind = self.pal.wind;
         let ri = Ink::Radial;
@@ -1218,13 +1207,6 @@ impl World {
         }
         gl.part(kit.stub, head.part(v3(0.0, 0.05, 0.0), v3(0.1, 0.075, 0.1)), navy, 0.0, ri);
         gl.part(kit.ball, head.part(v3(0.0, 0.055, 0.075), v3(0.075, 0.01, 0.05)), rgb(0x232845), 0.0, ri);
-    }
-
-    pub fn draw_grass(&self, gl: &Gl, cam: V3, fwd: V3) {
-        for c in self.grass.iter().filter(|c| !crate::prof::skip("grass") && self.visible(c, cam, fwd, 0.3, 5.5)) {
-            crate::prof::tris("grass", c.mesh.triangleCount as u64);
-            gl.draw_swaying(c.mesh, 1.0, true);
-        }
     }
 
     /// The rose's glass globe; after everything solid.

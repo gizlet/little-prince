@@ -104,7 +104,8 @@ fn main() {
             ffi::rlSetRenderBatchActive(batch);
         }
         ffi::SetExitKey(0);
-        ffi::SetTargetFPS(60);
+        // 0 leaves the pace to the display's vsync (78 Hz on the R36S panel).
+        ffi::SetTargetFPS(std::env::var("LITTLEPRINCE_FPS").ok().and_then(|v| v.parse().ok()).unwrap_or(60));
         ffi::rlSetClipPlanes(0.05, 150.0);
         if !KMS {
             ffi::SetWindowMinSize(320, 240);

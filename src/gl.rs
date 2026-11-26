@@ -745,6 +745,8 @@ impl Gl {
         for u in [&self.lit, &self.litv, &self.rig_u, &self.skin] {
             self.light_one(u, l, time);
         }
+        // Scenery tiles hold grass: only blade tips have a sway weight.
+        self.litv.f("sway", 1.0);
     }
 
     fn light_one(&self, u: &Uniforms, l: &Lighting, time: f32) {
@@ -776,6 +778,7 @@ impl Gl {
         self.tris.set(self.tris.get() + mesh.triangleCount as u64);
         unsafe {
             (*self.lit_mat.maps).color = c;
+            crate::prof::count_draw();
             ffi::DrawMesh(mesh, self.lit_mat, m);
         }
     }
@@ -802,6 +805,7 @@ impl Gl {
         self.tris.set(self.tris.get() + mesh.triangleCount as u64);
         unsafe {
             (*self.litv_mat.maps).color = c;
+            crate::prof::count_draw();
             ffi::DrawMesh(mesh, self.litv_mat, m);
         }
     }
@@ -812,13 +816,15 @@ impl Gl {
         unsafe {
             (*self.skin_mat.maps).texture = tex;
             (*self.skin_mat.maps).color = rgb(0xFFFFFF);
+            crate::prof::count_draw();
             ffi::DrawMesh(mesh, self.skin_mat, m);
             if self.outlines.get() && self.hero_ink.get() && !crate::prof::skip("heroink") {
                 (*self.outline_mat.maps).color = self.ink.get();
                 self.outline.f("width", self.ink_px.get());
                 self.outline.f("radial", 0.0);
                 ffi::rlSetCullFace(ffi::rlCullMode::RL_CULL_FACE_FRONT as i32);
-                ffi::DrawMesh(mesh, self.outline_mat, m);
+                crate::prof::count_draw();
+            ffi::DrawMesh(mesh, self.outline_mat, m);
                 ffi::rlSetCullFace(ffi::rlCullMode::RL_CULL_FACE_BACK as i32);
                 self.tris.set(self.tris.get() + mesh.triangleCount as u64);
             }
@@ -874,7 +880,8 @@ impl Gl {
             self.tris.set(self.tris.get() + mesh.triangleCount as u64);
             unsafe {
                 ffi::SetShaderValueV(u.shader, loc, bones.as_ptr() as _, ffi::ShaderUniformDataType::SHADER_UNIFORM_VEC4 as i32, bones.len() as i32);
-                ffi::DrawMesh(mesh, mat, crate::math::identity());
+                crate::prof::count_draw();
+            ffi::DrawMesh(mesh, mat, crate::math::identity());
             }
         }
     }
@@ -911,7 +918,8 @@ impl Gl {
                     radial = Some(r);
                 }
                 self.tris.set(self.tris.get() + p.mesh.triangleCount as u64);
-                unsafe { ffi::DrawMesh(p.mesh, self.outline_mat, p.m) };
+                unsafe { crate::prof::count_draw();
+            ffi::DrawMesh(p.mesh, self.outline_mat, p.m) };
             }
             for (k, r) in rigs.iter().enumerate() {
                 let list: Vec<&Part> = parts.iter().filter(|p| p.rig == Some(k) && p.ink != Ink::None).collect();
@@ -922,19 +930,6 @@ impl Gl {
         let mut back = parts;
         back.clear();
         *self.parts.borrow_mut() = back;
-    }
-
-    /// A world-space mesh whose `u` coordinate makes it sway in the wind.
-    pub fn draw_swaying(&self, mesh: Mesh, sway: f32, two_sided: bool) {
-        self.litv.f("sway", sway);
-        if two_sided {
-            unsafe { ffi::rlDisableBackfaceCulling() };
-        }
-        self.draw_v(mesh, crate::math::identity(), rgb(0xFFFFFF));
-        if two_sided {
-            unsafe { ffi::rlEnableBackfaceCulling() };
-        }
-        self.litv.f("sway", 0.0);
     }
 
     /// A see-through glass shape that brightens towards its edges.

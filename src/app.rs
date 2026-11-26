@@ -602,7 +602,6 @@ impl App {
         crate::prof::mark("cpu-parts");
         g.flush();
         crate::prof::mark("solids");
-        w.draw_grass(g, self.cam.pos, fwd);
         crate::prof::mark("grass");
         // The sky gradient last, on a quad at the far end of the view: only the
         // pixels the planet leaves uncovered are filled, not the whole screen.

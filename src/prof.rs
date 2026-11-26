@@ -81,6 +81,11 @@ pub fn add(name: &'static str, dt: f64) {
     });
 }
 
+/// Counts one mesh draw call, shown with `LITTLEPRINCE_PROFILE`.
+pub fn count_draw() {
+    tris("draws", 1000);
+}
+
 /// Ends the stage `name` here.
 pub fn mark(name: &'static str) {
     P.with(|p| {
