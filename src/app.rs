@@ -73,8 +73,7 @@ pub struct App {
     pub mode: Mode,
     /// Seconds in the current mode.
     pub mode_t: f32,
-    pub banner_t: f32,
-    planet_t: f32,
+    pub planet_t: f32,
     pub t: f32,
     pub idle_t: f32,
     pub lang: Lang,
@@ -125,7 +124,6 @@ impl App {
             stats: Stats::new(),
             mode: Mode::Title,
             mode_t: 0.0,
-            banner_t: 0.0,
             planet_t: 0.0,
             t: 0.0,
             idle_t: 0.0,
@@ -174,7 +172,6 @@ impl App {
             self.arrive_at(idx, 0.0);
         }
         self.set_mode(Mode::Play);
-        self.banner_t = 0.0;
         self.planet_t = 0.0;
     }
 
@@ -237,7 +234,6 @@ impl App {
     pub fn update(&mut self, dt: f32, c: &Controls) {
         self.t += dt;
         self.mode_t += dt;
-        self.banner_t += dt;
         self.planet_t += dt;
         self.stats.update(dt);
         let combo = c.down(Button::Select) && c.down(Button::Start);
@@ -316,7 +312,7 @@ impl App {
         }
 
         let t = self.t;
-        let wind = self.world().sky(self.player.n, t).wind;
+        let wind = self.world().wind();
         let w = &self.worlds[self.cur];
         self.player.update(dt, wish, jump, |n| w.surface(n), self.mode == Mode::Fly, wind, t);
         let (axis, ang) = self.player.moved;
@@ -367,24 +363,21 @@ impl App {
                 self.player.land(3.5);
                 self.player.reach_target = 0.0;
                 self.player.cheer = 1.0;
-                self.set_mode(Mode::Play);
-                self.banner_t = 0.0;
-                self.planet_t = 0.0;
+                self.start_play(self.cur);
             }
         }
     }
 
     fn player_effects(&mut self) {
         let kind = self.world().kind;
-        let accent = self.world().sky(self.player.n, self.t).accent;
+        let accent = self.world().accent();
         let dust = match kind {
             Kind::B612 => rgb(0xD9CFA6),
             Kind::Lamp => rgb(0xCBBFB0),
             Kind::Desert => rgb(0xF0D3A0),
         };
         let cols = [dust, lighten(dust, 0.3)];
-        let events: Vec<Ev> = self.player.events.drain(..).collect();
-        for ev in events {
+        for ev in self.player.events.drain(..) {
             match ev {
                 Ev::Step(p) => {
                     let up = p.norm();
@@ -562,7 +555,7 @@ impl App {
             fog_range: fog,
             cam: self.cam.pos,
             pusher: self.player.feet(),
-            wind: sky.wind,
+            wind: w.wind(),
             lamp,
             lamp_col: gl::scale(rgb(0xFFB45C), lamp_on * 1.4),
         };
@@ -602,7 +595,6 @@ impl App {
         crate::prof::mark("cpu-parts");
         g.flush();
         crate::prof::mark("solids");
-        crate::prof::mark("grass");
         // The sky gradient last, on a quad at the far end of the view: only the
         // pixels the planet leaves uncovered are filled, not the whole screen.
         if !crate::prof::skip("backdrop") {

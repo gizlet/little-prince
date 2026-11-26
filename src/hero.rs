@@ -12,6 +12,7 @@
 use crate::gl::Gl;
 use crate::math::{basis, Frame, V3};
 use raylib_sys::{self as ffi, Matrix, Mesh, Model, ModelAnimation, Texture2D, Transform};
+use std::cell::Cell;
 use std::ffi::{CStr, CString};
 use std::path::PathBuf;
 
@@ -125,6 +126,7 @@ pub struct Hero {
     /// The same vertices with fewer triangles, for the ink outline: on the
     /// handheld's GPU every triangle costs fragment time, however small.
     ink: [Mesh; 2],
+    ink_dirty: Cell<bool>,
     buf: usize,
     tex: Texture2D,
     bind_inv: Vec<M>,
@@ -223,8 +225,8 @@ impl Hero {
             let tex = tex?;
             ffi::SetTextureFilter(tex, ffi::TextureFilter::TEXTURE_FILTER_BILINEAR as i32);
             let ink_idx = crate::mesh::cluster(&pos, &idx, (top - foot) / INK_CELLS);
-            let meshes = [0, 1].map(|_| crate::mesh::upload_skinned(&pos, &nrm, &uv, &ids, &w, &idx));
-            let ink = [0, 1].map(|_| crate::mesh::upload_skinned(&pos, &nrm, &uv, &ids, &w, &ink_idx));
+            let meshes = [0, 1].map(|_| crate::mesh::upload_skinned(&pos, &nrm, Some(&uv), &idx));
+            let ink = [0, 1].map(|_| crate::mesh::upload_skinned(&pos, &nrm, None, &ink_idx));
             let bone_ids = ids;
             let bind_inv = (0..bones).map(|i| srt_inv(&*model.skeleton.bindPose.add(i))).collect();
             let names: Vec<String> = (0..count as usize).map(|i| cname(&(*anims.add(i)).name)).collect();
@@ -245,6 +247,7 @@ impl Hero {
                 count: count as usize,
                 meshes,
                 ink,
+                ink_dirty: Cell::new(false),
                 buf: 0,
                 tex,
                 bind_inv,
@@ -377,14 +380,17 @@ impl Hero {
             self.out_pos[v * 3..v * 3 + 3].copy_from_slice(&o);
             self.out_nrm[v * 3..v * 3 + 3].copy_from_slice(&[n[0] / l, n[1] / l, n[2] / l]);
         }
-        unsafe {
-            self.buf ^= 1;
-            let bytes = (self.out_pos.len() * 4) as i32;
-            for m in [self.meshes[self.buf], self.ink[self.buf]] {
-                let ids = std::slice::from_raw_parts(m.vboId, 3);
-                ffi::rlUpdateVertexBuffer(ids[0], self.out_pos.as_ptr() as _, bytes, 0);
-                ffi::rlUpdateVertexBuffer(ids[2], self.out_nrm.as_ptr() as _, bytes, 0);
-            }
+        self.buf ^= 1;
+        self.upload_pose(self.meshes[self.buf]);
+        self.ink_dirty.set(true);
+    }
+
+    fn upload_pose(&self, mesh: Mesh) {
+        for (slot, data) in [
+            (ffi::RL_DEFAULT_SHADER_ATTRIB_LOCATION_POSITION, self.out_pos.as_slice()),
+            (ffi::RL_DEFAULT_SHADER_ATTRIB_LOCATION_NORMAL, self.out_nrm.as_slice()),
+        ] {
+            unsafe { ffi::UpdateMeshBuffer(mesh, slot as i32, data.as_ptr().cast(), std::mem::size_of_val(data) as i32, 0) };
         }
     }
 
@@ -392,7 +398,14 @@ impl Hero {
     pub fn draw(&self, gl: &Gl, f: &Frame, h: f32) {
         let k = h / self.height.max(1e-3);
         let m: Matrix = basis(f.x * k, f.y * k, f.z * k, f.o - f.y * (self.foot * k));
-        gl.draw_skinned(self.meshes[self.buf], self.ink[self.buf], m, self.tex);
+        let ink = gl.hero_outline_enabled().then(|| {
+            let mesh = self.ink[self.buf];
+            if self.ink_dirty.replace(false) {
+                self.upload_pose(mesh);
+            }
+            mesh
+        });
+        gl.draw_skinned(self.meshes[self.buf], ink, m, self.tex);
     }
 
     /// The top of the head, for the birds' strings.

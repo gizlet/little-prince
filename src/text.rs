@@ -9,7 +9,7 @@
 
 use raylib_sys::{self as ffi, Color, Font, GlyphInfo, Rectangle, Vector2};
 use std::collections::BTreeSet;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 
 static INTER: &[u8] = include_bytes!("../assets/fonts/Inter-SemiBold.ttf");
 static GROTESK: &[u8] = include_bytes!("../assets/fonts/SpaceGrotesk-Bold.ttf");
@@ -269,21 +269,33 @@ impl Fonts {
     }
 
     pub fn measure(&self, s: &str, size: f32, w: Weight) -> f32 {
-        let c = CString::new(s).unwrap_or_default();
-        unsafe { ffi::MeasureTextEx(self.pick(w, size), c.as_ptr(), size, 0.0).x }
+        let text = CString::new(s).unwrap_or_default();
+        Self::width(self.pick(w, size), &text, size)
     }
 
-    pub fn draw(&self, s: &str, x: f32, y: f32, size: f32, color: Color, align: Align, w: Weight) -> f32 {
-        let width = self.measure(s, size, w);
-        let x = match align {
+    fn width(font: Font, text: &CStr, size: f32) -> f32 {
+        unsafe { ffi::MeasureTextEx(font, text.as_ptr(), size, 0.0).x }
+    }
+
+    fn draw_text(&self, font: Font, text: &CStr, x: f32, y: f32, size: f32, color: Color) {
+        // Snap to device pixels so small text does not blur.
+        let snap = |v: f32| (v * self.zoom).round() / self.zoom;
+        unsafe { ffi::DrawTextEx(font, text.as_ptr(), Vector2 { x: snap(x), y: snap(y) }, size, 0.0, color) };
+    }
+
+    fn align_x(x: f32, width: f32, align: Align) -> f32 {
+        match align {
             Align::Left => x,
             Align::Center => x - width / 2.0,
             Align::Right => x - width,
-        };
-        let c = CString::new(s).unwrap_or_default();
-        // Snap to device pixels so small text does not blur.
-        let snap = |v: f32| (v * self.zoom).round() / self.zoom;
-        unsafe { ffi::DrawTextEx(self.pick(w, size), c.as_ptr(), Vector2 { x: snap(x), y: snap(y) }, size, 0.0, color) };
+        }
+    }
+
+    pub fn draw(&self, s: &str, x: f32, y: f32, size: f32, color: Color, align: Align, w: Weight) -> f32 {
+        let text = CString::new(s).unwrap_or_default();
+        let font = self.pick(w, size);
+        let width = Self::width(font, &text, size);
+        self.draw_text(font, &text, Self::align_x(x, width, align), y, size, color);
         width
     }
 
@@ -294,8 +306,12 @@ impl Fonts {
     /// Text with a soft dark shadow, for words over the moving scene.
     pub fn shadowed(&self, s: &str, x: f32, y: f32, size: f32, color: Color, align: Align, w: Weight) -> f32 {
         let sh = Color { r: 6, g: 8, b: 22, a: (color.a as f32 * 0.55) as u8 };
-        self.draw(s, x + 1.0, y + 1.5, size, sh, align, w);
-        self.draw(s, x, y, size, color, align, w)
+        let text = CString::new(s).unwrap_or_default();
+        let font = self.pick(w, size);
+        let width = Self::width(font, &text, size);
+        self.draw_text(font, &text, Self::align_x(x + 1.0, width, align), y + 1.5, size, sh);
+        self.draw_text(font, &text, Self::align_x(x, width, align), y, size, color);
+        width
     }
 }
 

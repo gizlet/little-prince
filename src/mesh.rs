@@ -145,18 +145,17 @@ unsafe fn copy<T: Copy>(src: &[T]) -> *mut T {
     p
 }
 
-/// A skinned mesh for `Gl::draw_skinned`: bone indices travel in the colour
-/// attribute and bone weights in the tangent attribute.
-pub fn upload_skinned(pos: &[f32], nrm: &[f32], uv: &[f32], ids: &[u8], w: &[f32], idx: &[u16]) -> Mesh {
+/// A dynamic mesh for CPU skinning, with UVs only for textured passes.
+pub fn upload_skinned(pos: &[f32], nrm: &[f32], uv: Option<&[f32]>, idx: &[u16]) -> Mesh {
     unsafe {
         let mut m: Mesh = std::mem::zeroed();
         m.vertexCount = (pos.len() / 3) as i32;
         m.triangleCount = (idx.len() / 3) as i32;
         m.vertices = copy(pos);
         m.normals = copy(nrm);
-        m.texcoords = copy(uv);
-        m.colors = copy(ids);
-        m.tangents = copy(w);
+        if let Some(uv) = uv {
+            m.texcoords = copy(uv);
+        }
         m.indices = copy(idx);
         ffi::UploadMesh(&mut m, true);
         m
@@ -428,41 +427,35 @@ pub struct Tile {
 impl Builder {
     /// Splits the (unindexed) triangles by which of the 80 cell directions
     /// their centre is nearest; always 80 builders, some empty.
-    fn cells(self) -> Vec<Builder> {
-        let centers = cell_dirs();
+    fn cells(self, centers: &[V3]) -> Vec<Builder> {
         let mut parts: Vec<Builder> = vec![Builder::default(); centers.len()];
         let at = |v: usize| v3(self.pos[v * 3], self.pos[v * 3 + 1], self.pos[v * 3 + 2]);
         for t in 0..self.pos.len() / 9 {
             let c = (at(t * 3) + at(t * 3 + 1) + at(t * 3 + 2)).norm();
             let i = (0..centers.len()).max_by(|&a, &b| centers[a].dot(c).total_cmp(&centers[b].dot(c))).unwrap_or(0);
-            let p = &mut parts[i];
-            for v in t * 3..t * 3 + 3 {
-                p.pos.extend(&self.pos[v * 3..v * 3 + 3]);
-                p.nrm.extend(&self.nrm[v * 3..v * 3 + 3]);
-                p.uv.extend(&self.uv[v * 2..v * 2 + 2]);
-                p.col.extend(&self.col[v * 4..v * 4 + 4]);
-            }
+            parts[i].append_vertices(&self, t * 3, 3);
         }
         parts
     }
 
-    /// Every other blade of grass (each blade is two triangles, one per side).
-    fn thinned(&self) -> Builder {
-        let mut b = Builder::default();
-        for t in (0..self.pos.len() / 9).filter(|t| t / 2 % 2 == 0) {
-            b.pos.extend(&self.pos[t * 9..t * 9 + 9]);
-            b.nrm.extend(&self.nrm[t * 9..t * 9 + 9]);
-            b.uv.extend(&self.uv[t * 6..t * 6 + 6]);
-            b.col.extend(&self.col[t * 12..t * 12 + 12]);
+    /// Append every other double-sided grass blade, keeping both triangles.
+    fn append_thinned_grass(&mut self, grass: &Builder) {
+        for first in (0..grass.pos.len() / 3).step_by(12) {
+            let count = (grass.pos.len() / 3 - first).min(6);
+            self.append_vertices(grass, first, count);
         }
-        b
     }
 
-    fn append(&mut self, o: &Builder) {
-        self.pos.extend(&o.pos);
-        self.nrm.extend(&o.nrm);
-        self.uv.extend(&o.uv);
-        self.col.extend(&o.col);
+    fn append(&mut self, other: &Builder) {
+        self.append_vertices(other, 0, other.pos.len() / 3);
+    }
+
+    fn append_vertices(&mut self, other: &Builder, first: usize, count: usize) {
+        let end = first + count;
+        self.pos.extend_from_slice(&other.pos[first * 3..end * 3]);
+        self.nrm.extend_from_slice(&other.nrm[first * 3..end * 3]);
+        self.uv.extend_from_slice(&other.uv[first * 2..end * 2]);
+        self.col.extend_from_slice(&other.col[first * 4..end * 4]);
     }
 }
 
@@ -470,35 +463,37 @@ fn cell_dirs() -> Vec<V3> {
     icosphere(1).iter().map(|f| (f[0] + f[1] + f[2]).norm()).collect()
 }
 
-/// Builds the planet's tiles from its ground, full and coarse scenery,
-/// flowers and grass (all unindexed, in world space).
-pub fn tiles(ground: Builder, props: Builder, props_lo: Builder, decor: Builder, grass: Builder) -> Vec<Tile> {
-    let mut g = ground.cells().into_iter();
-    let mut p = props.cells().into_iter();
-    let mut l = props_lo.cells().into_iter();
-    let mut d = decor.cells().into_iter();
-    let mut s = grass.cells().into_iter();
-    let mut out = Vec::new();
-    for dir in cell_dirs() {
-        let (g, p, l, d, s) = (g.next().unwrap(), p.next().unwrap(), l.next().unwrap(), d.next().unwrap(), s.next().unwrap());
+pub struct TileLayers {
+    pub props: bool,
+    pub flowers: bool,
+    pub grass: bool,
+}
+
+/// Builds the planet's tiles from unindexed layers in world space.
+pub fn tiles([ground, props, props_lo, flowers, grass]: [Builder; 5], layers: TileLayers) -> Vec<Tile> {
+    let dirs = cell_dirs();
+    let mut cells = [ground, props, props_lo, flowers, grass].map(|layer| layer.cells(&dirs).into_iter());
+    let mut out = Vec::with_capacity(dirs.len());
+    for dir in dirs {
+        let [g, p, l, d, s] = cells.each_mut().map(|layer| layer.next().unwrap());
         if g.pos.is_empty() && p.pos.is_empty() && d.pos.is_empty() && s.pos.is_empty() {
             continue;
         }
         let mut near = g.clone();
-        // `LITTLEPRINCE_SKIP` can leave a layer out, for measuring its cost.
-        for (part, name) in [(&p, "props"), (&d, "flowers")] {
-            if !crate::prof::skip(name) {
-                near.append(part);
-            }
+        if layers.props {
+            near.append(&p);
+        }
+        if layers.flowers {
+            near.append(&d);
         }
         let mut close = near.clone();
-        if !crate::prof::skip("grass") {
+        if layers.grass {
             close.append(&s);
-            near.append(&s.thinned());
+            near.append_thinned_grass(&s);
         }
         let ang = close.pos.chunks(3).map(|q| v3(q[0], q[1], q[2]).norm().dot(dir).clamp(-1.0, 1.0).acos()).fold(0.0, f32::max);
         let mut mid = g.clone();
-        if !crate::prof::skip("props") {
+        if layers.props {
             mid.append(&l);
         }
         out.push(Tile { dir, ang, close: close.indexed().upload(), near: near.indexed().upload(), mid: mid.indexed().upload(), far: g.indexed().upload() });
@@ -534,6 +529,8 @@ impl Kit {
             f(&mut b);
             b
         };
+        const BALL: usize = 0;
+        const COARSE_BALL: usize = 5;
         let shapes = [
             shape(&|b| ellipsoid(b, V3::ZERO, ax, 2, &|_| white, &no_sway, true)),
             shape(&|b| frustum(b, V3::ZERO, up, 10, (0.0, 1.0, 1.0, 0.0), white, &no_sway, true)),
@@ -553,10 +550,11 @@ impl Kit {
             let per_tris = b.tris() as i32;
             let batch = b.replicate(crate::gl::RIG_N).upload();
             let single = b.upload();
-            rigs.push(Rig { single: unsafe { *single.vboId }, mesh: batch, per, per_tris });
+            rigs.push(Rig { single: unsafe { *single.vboId }, mesh: batch, per, per_tris, coarse: None });
             singles.push(single);
         }
-        Kit { ball: singles[0], cone: singles[1], stub: singles[2], tube: singles[3], cube: singles[4], taper: singles[6], rigs }
+        rigs[BALL].coarse = Some((COARSE_BALL, 0.05));
+        Kit { ball: singles[BALL], cone: singles[1], stub: singles[2], tube: singles[3], cube: singles[4], taper: singles[6], rigs }
     }
 
     /// A tapering limb from `a` (radius `r0`) to `b` (radius `r1`), with round ends.

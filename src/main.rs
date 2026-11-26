@@ -59,18 +59,6 @@ fn view() -> (Rectangle, f32) {
     (Rectangle { x: ((sw - w) / 2.0).floor(), y: ((sh - h) / 2.0).floor(), width: w, height: h }, k)
 }
 
-/// Seconds of CPU time the calling thread has used.
-fn thread_cpu() -> f64 {
-    #[cfg(unix)]
-    unsafe {
-        let mut ts: libc::timespec = std::mem::zeroed();
-        libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut ts);
-        ts.tv_sec as f64 + ts.tv_nsec as f64 * 1e-9
-    }
-    #[cfg(not(unix))]
-    0.0
-}
-
 fn main() {
     if std::env::args().nth(1).as_deref() == Some("--version") {
         println!("littleprince {}", env!("CARGO_PKG_VERSION"));
@@ -135,8 +123,7 @@ fn main() {
     }
     let start = unsafe { ffi::GetTime() };
     while !unsafe { ffi::WindowShouldClose() } && !app.quit {
-        let t0 = unsafe { ffi::GetTime() };
-        let c0 = thread_cpu();
+        let frame = prof::start_frame();
         let dt = if capture.is_some() { 1.0 / 60.0 } else { unsafe { ffi::GetFrameTime() }.min(0.1) };
         let now = unsafe { ffi::GetTime() } - start;
         controls.poll(dt, now);
@@ -183,13 +170,13 @@ fn main() {
             }
             break;
         }
-        prof::add("cpu", unsafe { ffi::GetTime() } - t0);
+        if let Some(frame) = &frame {
+            frame.before_swap();
+        }
         unsafe { ffi::EndDrawing() };
         prof::mark("swap");
-        // CPU time this thread actually ran: the rest of the frame it waited.
-        prof::add("thread-cpu", thread_cpu() - c0);
-        if prof::on() {
-            prof::frame(&format!("{:?} fx{} parts{} tris{}k", app.world().kind, app.fx_level, app.fx.count(), app.gl.tris.take() / 1000));
+        if let Some(frame) = frame {
+            frame.finish(|tris| format!("{:?} fx{} parts{} tris{}k", app.world().kind, app.fx_level, app.fx.count(), tris / 1000));
         }
     }
     unsafe { ffi::CloseWindow() };

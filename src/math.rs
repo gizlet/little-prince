@@ -126,11 +126,8 @@ pub fn identity() -> Matrix {
 /// Places a model whose +Y is "up" at `pos`, standing on `up`, facing `fwd`,
 /// scaled by `s` (x, y, z in model space).
 pub fn place(pos: V3, up: V3, fwd: V3, s: V3) -> Matrix {
-    let up = up.norm();
-    let f = fwd.flatten(up);
-    let f = if f.len() < 1e-4 { any_perp(up) } else { f.norm() };
-    let r = up.cross(f);
-    basis(r * s.x, up * s.y, f * s.z, pos)
+    let f = Frame::new(pos, up, fwd);
+    basis(f.x * s.x, f.y * s.y, f.z * s.z, f.o)
 }
 
 /// A local coordinate frame: right `x`, up `y`, forward `z`, at `o`.

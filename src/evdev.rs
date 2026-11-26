@@ -8,7 +8,6 @@
 //! left to raylib. Devices are rescanned every two seconds for hotplug.
 
 use crate::input::{Button, RawPad};
-use std::ffi::CStr;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 
 const EV_KEY: u16 = 0x01;
@@ -116,7 +115,6 @@ impl Abs {
 struct Device {
     path: String,
     fd: OwnedFd,
-    name: String,
     gamepad: bool,
     keys: Vec<bool>,
     abs: [Abs; ABS_CNT],
@@ -142,9 +140,6 @@ impl Device {
         if bit(&keys, KEY_A) || !(gamepad || extra) {
             return None;
         }
-        let mut name = [0u8; 256];
-        unsafe { libc::ioctl(raw, eviocg(0x06, name.len() - 1) as _, name.as_mut_ptr()) };
-        let name = CStr::from_bytes_until_nul(&name).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let mut abs_bits = [0u8; ABS_CNT / 8];
         unsafe { libc::ioctl(raw, eviocg(0x20 + EV_ABS as u64, abs_bits.len()) as _, abs_bits.as_mut_ptr()) };
         let mut abs = [Abs::default(); ABS_CNT];
@@ -164,7 +159,7 @@ impl Device {
         let mut held = [0u8; KEY_CNT / 8];
         unsafe { libc::ioctl(raw, eviocg(0x18, held.len()) as _, held.as_mut_ptr()) };
         let keys = (0..KEY_CNT).map(|k| bit(&held, k)).collect();
-        Some(Device { path: path.to_string(), fd, name, gamepad, keys, abs, has_abs })
+        Some(Device { path: path.to_string(), fd, gamepad, keys, abs, has_abs })
     }
 
     /// Applies pending events. False when the device is gone.
@@ -263,12 +258,11 @@ impl Evdev {
 
     /// Adds the devices' state to `pad`; true when a gamepad is among them.
     pub fn state(&self, pad: &mut RawPad) -> bool {
+        let mut gamepad = false;
         for d in &self.devices {
             d.apply(pad);
-            if d.gamepad && pad.name.is_none() {
-                pad.name = Some(d.name.clone());
-            }
+            gamepad |= d.gamepad;
         }
-        self.devices.iter().any(|d| d.gamepad)
+        gamepad
     }
 }

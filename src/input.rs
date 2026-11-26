@@ -40,7 +40,6 @@ pub const BUTTONS: usize = 20;
 #[derive(Clone, Default)]
 pub struct RawPad {
     #[cfg_attr(not(all(target_os = "linux", feature = "gizlet-os")), allow(dead_code))]
-    pub name: Option<String>,
     pub buttons: [bool; BUTTONS],
     /// Left X/Y and right X/Y in -1..1, then the left and right triggers in 0..1.
     pub axes: [f32; 6],

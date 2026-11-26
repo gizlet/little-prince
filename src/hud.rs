@@ -191,7 +191,7 @@ fn play(app: &App) {
     let w = app.world();
     let (name, hint, label) = w.name();
 
-    let bt = app.banner_t;
+    let bt = app.planet_t;
     if app.mode == Mode::Play && bt < 5.5 {
         let k = ease_back(bt / 0.6);
         let out = 1.0 - smooth((bt - 4.2) / 0.9);

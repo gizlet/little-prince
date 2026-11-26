@@ -18,7 +18,7 @@ use crate::math::{any_perp, approach, place, smooth, v3, Frame, Rng, V3};
 use crate::mesh::{self, no_sway, Builder, Kit, Tile};
 use crate::sound::{Sfx, Sounds};
 use crate::text::T;
-use raylib_sys::{Color, Mesh};
+use raylib_sys::Color;
 use std::f32::consts::{PI, TAU};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -52,8 +52,6 @@ pub struct Sky {
     pub fog: Color,
     pub stars: f32,
     pub night: f32,
-    pub wind: V3,
-    pub accent: Color,
     pub ink: Color,
 }
 
@@ -674,7 +672,11 @@ impl World {
             }
         }
         let lo = props.lo.take().map(|b| *b).unwrap_or_default();
-        w.tiles = mesh::tiles(ground, props, lo, decor, grass);
+        w.tiles = mesh::tiles([ground, props, lo, decor, grass], mesh::TileLayers {
+            props: !crate::prof::skip("props"),
+            flowers: !crate::prof::skip("flowers"),
+            grass: !crate::prof::skip("grass"),
+        });
         w
     }
 
@@ -695,6 +697,14 @@ impl World {
     }
 
     /// The sky over `n` at time `t`: day, sunset or night by the sun's height there.
+    pub fn wind(&self) -> V3 {
+        self.pal.wind
+    }
+
+    pub fn accent(&self) -> Color {
+        self.pal.accent
+    }
+
     pub fn sky(&self, n: V3, t: f32) -> Sky {
         let sun = self.sun(t);
         let e = n.norm().dot(sun);
@@ -714,8 +724,6 @@ impl World {
             fog: w3(p.day.1, p.set.1, p.night.1),
             stars: (wn + ws * 0.4) * p.stars,
             night: wn,
-            wind: p.wind,
-            accent: p.accent,
             ink: w3(rgb(0x4A3540), rgb(0x45304A), rgb(0x1E1A3C)),
         }
     }
@@ -1052,41 +1060,48 @@ impl World {
         Sprites::end();
     }
 
-    /// Whether a tile, with things up to `h` tall on it, can be seen from
-    /// `cam` looking along `fwd`, within `far`: above the horizon, not behind
-    /// the camera, near enough. Returns its distance.
-    fn visible(&self, c: &Tile, cam: V3, fwd: V3, h: f32, far: f32) -> Option<f32> {
+    /// Queues the visible planet tiles front to back for early depth rejection.
+    fn queue_tiles(&self, gl: &Gl, cam: V3, fwd: V3) {
+        const MAX_HEIGHT: f32 = 4.0;
+        const VIEW_DISTANCE: f32 = 60.0;
         let r = self.radius;
-        let cd = cam.len().max(r + 0.01);
-        let theta = c.dir.dot(cam * (1.0 / cd)).clamp(-1.0, 1.0).acos();
-        let horizon = (r / cd).min(1.0).acos() + (r / (r + h)).min(1.0).acos();
-        if theta - c.ang > horizon + 0.05 {
-            return None;
+        let cam_dist = cam.len().max(r + 0.01);
+        let cam_dir = cam * (1.0 / cam_dist);
+        let horizon = (r / cam_dist).min(1.0).acos() + (r / (r + MAX_HEIGHT)).min(1.0).acos();
+        let mut visible = Vec::with_capacity(self.tiles.len());
+        // Preserve the existing tie order for equally distant cells.
+        for tile in self.tiles.iter().rev() {
+            let theta = tile.dir.dot(cam_dir).clamp(-1.0, 1.0).acos();
+            if theta - tile.ang > horizon + 0.05 {
+                continue;
+            }
+            let extent = r * tile.ang;
+            let bound = extent + MAX_HEIGHT;
+            let delta = tile.dir * r - cam;
+            let dist = delta.len();
+            if dist - bound < VIEW_DISTANCE && delta.dot(fwd) > -bound {
+                visible.push(((dist - extent).max(0.0), tile));
+            }
         }
-        let wr = r * c.ang + h;
-        let d = c.dir * r - cam;
-        (d.len() - wr < far && d.dot(fwd) > -wr).then(|| (d.len() - r * c.ang).max(0.0))
+        visible.sort_by(|a, b| a.0.total_cmp(&b.0));
+        for (dist, tile) in visible {
+            let (mesh, lod) = if dist < CLOSE {
+                (tile.close, "close")
+            } else if dist < NEAR {
+                (tile.near, "near")
+            } else if dist < MID {
+                (tile.mid, "mid")
+            } else {
+                (tile.far, "far")
+            };
+            gl.surface(mesh, lod);
+        }
     }
 
     /// The solid parts of the planet, queued for `Gl::flush`.
     pub fn draw(&self, gl: &Gl, kit: &Kit, t: f32, cam: V3, fwd: V3) {
-        // One draw call per visible cell: everything near in full, scenery
-        // farther off coarser, and only the ground beyond. Queued farthest
-        // first, because `flush` draws the queue backwards: near cells then
-        // hide what is behind them before it is shaded.
         if !crate::prof::skip("world") {
-            let mut list: Vec<(f32, Mesh, &'static str)> = Vec::new();
-            for c in &self.tiles {
-                if let Some(d) = self.visible(c, cam, fwd, 4.0, 60.0) {
-                    let (m, name) = if d < CLOSE { (c.close, "close") } else if d < NEAR { (c.near, "near") } else if d < MID { (c.mid, "mid") } else { (c.far, "far") };
-                    list.push((d, m, name));
-                }
-            }
-            list.sort_by(|a, b| b.0.total_cmp(&a.0));
-            for (_, m, name) in list {
-                crate::prof::tris(name, m.triangleCount as u64);
-                gl.surface(m, Ink::None);
-            }
+            self.queue_tiles(gl, cam, fwd);
         }
         let wind = self.pal.wind;
         let ri = Ink::Radial;
@@ -1290,7 +1305,7 @@ fn draw_fox(gl: &Gl, kit: &Kit, f: &Fox, r: f32, t: f32) {
         let swing = ph.sin() * 0.06 * run;
         let hip = b.at(v3(x * 0.045, 0.13, z * 0.09));
         let foot = if z < 0.0 && f.sit > 0.5 { g.at(v3(x * 0.06, 0.02, -0.02)) } else { g.at(v3(x * 0.045, 0.02, z * 0.09 * (1.0 - f.sit * 0.3) + swing)) };
-        kit.limb(gl, hip, foot, 0.022, if z > 0.0 { orange } else { orange });
+        kit.limb(gl, hip, foot, 0.022, orange);
         gl.part(kit.ball, place(foot, f.n, f.face, v3(0.022, 0.018, 0.03)), dark, 0.0, ri);
     }
     gl.part(kit.ball, b.part(v3(0.0, 0.15, 0.0), v3(0.07, 0.07, 0.13)), orange, 0.0, ri);

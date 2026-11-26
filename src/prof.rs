@@ -1,6 +1,6 @@
 //! A frame profiler for `LITTLEPRINCE_PROFILE=1`: `mark` waits for the GPU
 //! (glFinish) and charges the time since the last mark to a stage; every
-//! three seconds the averages go to stderr. Off by default, at no cost.
+//! three seconds the averages go to stderr. Off by default.
 
 use raylib_sys as ffi;
 use std::cell::RefCell;
@@ -17,6 +17,8 @@ struct Prof {
     since: f64,
     finish: Option<unsafe extern "C" fn()>,
     tris: Vec<(&'static str, u64)>,
+    frame_tris: u64,
+    draws: u64,
 }
 
 thread_local! {
@@ -41,20 +43,20 @@ pub fn enable(split: bool, wait: bool) {
     });
 }
 
-pub fn on() -> bool {
-    P.with(|p| p.borrow().on)
-}
-
-/// Counts `n` triangles under `name` (shown with `LITTLEPRINCE_PROFILE`).
-pub fn tris(name: &'static str, n: u64) {
+/// Records one mesh submission, optionally grouped by terrain LOD.
+pub fn mesh(tris: u64, lod: Option<&'static str>) {
     P.with(|p| {
         let mut p = p.borrow_mut();
         if !p.on {
             return;
         }
-        match p.tris.iter_mut().find(|s| s.0 == name) {
-            Some(s) => s.1 += n,
-            None => p.tris.push((name, n)),
+        p.frame_tris += tris;
+        p.draws += 1;
+        if let Some(name) = lod {
+            match p.tris.iter_mut().find(|s| s.0 == name) {
+                Some(s) => s.1 += tris,
+                None => p.tris.push((name, tris)),
+            }
         }
     });
 }
@@ -68,7 +70,7 @@ pub fn skip(part: &str) -> bool {
 }
 
 /// Adds `dt` seconds to stage `name` without waiting for the GPU.
-pub fn add(name: &'static str, dt: f64) {
+fn add(name: &'static str, dt: f64) {
     P.with(|p| {
         let mut p = p.borrow_mut();
         if !p.on {
@@ -79,11 +81,6 @@ pub fn add(name: &'static str, dt: f64) {
             None => p.stages.push((name, dt)),
         }
     });
-}
-
-/// Counts one mesh draw call, shown with `LITTLEPRINCE_PROFILE`.
-pub fn count_draw() {
-    tris("draws", 1000);
 }
 
 /// Ends the stage `name` here.
@@ -111,25 +108,54 @@ pub fn mark(name: &'static str) {
     });
 }
 
-/// Ends a frame; prints the averages every three seconds.
-pub fn frame(extra: &str) {
-    P.with(|p| {
-        let mut p = p.borrow_mut();
-        if !p.on {
-            return;
-        }
-        p.frames += 1;
-        let now = unsafe { ffi::GetTime() };
-        if now - p.since >= 3.0 {
-            let n = p.frames as f64;
-            let total = (now - p.since) / n * 1000.0;
-            let parts: Vec<String> = p.stages.iter().map(|(s, t)| format!("{s} {:.1}", t / n * 1000.0)).collect();
-            let t: Vec<String> = p.tris.iter().map(|(s, c)| format!("{s} {}k", c / p.frames as u64 / 1000)).collect();
-            eprintln!("prof: {:.1} fps {:.1} ms | {} | {extra} | {}", 1000.0 / total, total, parts.join(" · "), t.join(" "));
-            p.tris.clear();
-            p.stages.clear();
-            p.frames = 0;
-            p.since = now;
-        }
-    });
+/// Seconds of CPU time the calling thread has used.
+fn thread_cpu() -> f64 {
+    #[cfg(unix)]
+    unsafe {
+        let mut ts: libc::timespec = std::mem::zeroed();
+        libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut ts);
+        ts.tv_sec as f64 + ts.tv_nsec as f64 * 1e-9
+    }
+    #[cfg(not(unix))]
+    0.0
+}
+
+pub struct FrameTimer {
+    wall_start: f64,
+    cpu_start: f64,
+}
+
+pub fn start_frame() -> Option<FrameTimer> {
+    P.with(|p| p.borrow().on.then(|| FrameTimer { wall_start: unsafe { ffi::GetTime() }, cpu_start: thread_cpu() }))
+}
+
+impl FrameTimer {
+    pub fn before_swap(&self) {
+        add("cpu", unsafe { ffi::GetTime() } - self.wall_start);
+    }
+
+    /// Prints the averages every three seconds.
+    pub fn finish(self, describe: impl FnOnce(u64) -> String) {
+        add("thread-cpu", thread_cpu() - self.cpu_start);
+        P.with(|p| {
+            let mut p = p.borrow_mut();
+            let tris = std::mem::take(&mut p.frame_tris);
+            p.frames += 1;
+            let now = unsafe { ffi::GetTime() };
+            if now - p.since >= 3.0 {
+                let n = p.frames as f64;
+                let total = (now - p.since) / n * 1000.0;
+                let parts: Vec<String> = p.stages.iter().map(|(s, t)| format!("{s} {:.1}", t / n * 1000.0)).collect();
+                let lod: Vec<String> = p.tris.iter().map(|(s, c)| format!("{s} {}k", c / p.frames as u64 / 1000)).collect();
+                let draws = p.draws / p.frames as u64;
+                // Keep the existing report format consumed by profiling scripts.
+                eprintln!("prof: {:.1} fps {:.1} ms | {} | {} | {} draws {draws}k", 1000.0 / total, total, parts.join(" · "), describe(tris), lod.join(" "));
+                p.tris.clear();
+                p.stages.clear();
+                p.draws = 0;
+                p.frames = 0;
+                p.since = now;
+            }
+        });
+    }
 }

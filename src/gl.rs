@@ -129,40 +129,32 @@ impl Uniforms {
     }
 }
 
+const LIGHTING_GLSL: &str = r#"
+vec3 lamp_light(vec3 base, vec3 n, vec3 l, vec3 color) {
+    float ld = length(l);
+    float lamp = max(0.0, 1.0 - ld / 2.3);
+    return base * color * lamp * lamp * (0.35 + 0.65 * max(dot(n, l / max(ld, 0.001)), 0.0));
+}
+
+float fog_factor(vec3 delta, vec2 range) {
+    return clamp((length(delta) - range.x) / (range.y - range.x), 0.0, 1.0);
+}
+"#;
+
 const LIT_VS: &str = r#"
 attribute vec3 vertexPosition;
 attribute vec3 vertexNormal;
-attribute vec2 vertexTexCoord;
 attribute vec4 vertexColor;
 uniform mat4 mvp;
 uniform mat4 matModel;
-uniform float time;
-uniform float sway;
-uniform vec3 pusher;
-uniform vec3 wind;
 varying vec3 vN;
 varying vec3 vW;
 varying vec4 vC;
-varying float vG;
 void main() {
-    vec3 w = (matModel * vec4(vertexPosition, 1.0)).xyz;
-    vec3 off = vec3(0.0);
-    float k = vertexTexCoord.x * sway;
-    if (k > 0.0) {
-        float s = sin(time * 2.3 + vertexTexCoord.y * 6.2831 + dot(w, vec3(0.9, 0.4, 0.7)));
-        float g = sin(time * 0.7 + dot(w, vec3(0.2, 0.5, 0.3))) * 0.5 + 0.5;
-        off = wind * (0.03 + 0.06 * s * g) * k;
-        vec3 d = w - pusher;
-        float dl = length(d);
-        off += d / max(dl, 0.001) * k * 0.2 * max(0.0, 1.0 - dl / 0.5);
-        vec3 up = normalize(w);
-        off -= up * dot(off, up) * 0.6;
-    }
-    vW = w + off;
+    vW = (matModel * vec4(vertexPosition, 1.0)).xyz;
     vN = (matModel * vec4(vertexNormal, 0.0)).xyz;
     vC = vertexColor;
-    vG = vertexTexCoord.y;
-    gl_Position = mvp * vec4(vertexPosition + off, 1.0);
+    gl_Position = mvp * vec4(vertexPosition, 1.0);
 }
 "#;
 
@@ -170,7 +162,6 @@ const LIT_FS: &str = r#"
 varying vec3 vN;
 varying vec3 vW;
 varying vec4 vC;
-varying float vG;
 uniform vec4 colDiffuse;
 uniform vec3 sunDir;
 uniform vec3 sunCol;
@@ -184,8 +175,6 @@ uniform vec3 lampCol;
 uniform vec2 fogRange;
 uniform float emissive;
 uniform float fresnel;
-uniform float uvGlow;
-uniform float time;
 void main() {
     vec3 n = normalize(vN);
     vec3 up = normalize(vW);
@@ -195,21 +184,18 @@ void main() {
     float day = smoothstep(-0.28, 0.18, dot(up, sunDir));
     vec3 light = mix(shadeCol, sunCol * 0.9, lit * day) + skyCol * (0.06 + 0.1 * (dot(n, up) * 0.5 + 0.5));
     vec3 col = base * light;
-    vec3 l = lampPos - vW;
-    float ld = length(l);
-    float lamp = max(0.0, 1.0 - ld / 2.3);
-    col += base * lampCol * lamp * lamp * (0.35 + 0.65 * max(dot(n, l / max(ld, 0.001)), 0.0));
+    col += lamp_light(base, n, lampPos - vW, lampCol);
     vec3 v = normalize(camPos - vW);
     float rim = 1.0 - max(dot(n, v), 0.0);
     col += rimCol * smoothstep(0.62, 0.74, rim) * lit * day * 0.22 * vC.a;
-    col += base * (emissive + uvGlow * vG);
+    col += base * emissive;
     float a = colDiffuse.a * vC.a;
     if (fresnel > 0.0) {
         float fr = rim * rim;
         col += vec3(1.0) * fresnel * fr * rim;
         a = clamp(a + fresnel * fr, 0.0, 1.0);
     }
-    float f = clamp((length(camPos - vW) - fogRange.x) / (fogRange.y - fogRange.x), 0.0, 1.0);
+    float f = fog_factor(camPos - vW, fogRange);
     col = mix(col, fogCol, f * 0.4);
     FRAG = vec4(col, a);
 }
@@ -226,26 +212,22 @@ attribute vec4 vertexColor;
 uniform mat4 mvp;
 uniform mat4 matModel;
 uniform float time;
-uniform float sway;
 uniform vec3 pusher;
 uniform vec3 wind;
-uniform vec4 colDiffuse;
 uniform vec3 sunDir;
 uniform vec3 sunCol;
 uniform vec3 shadeCol;
 uniform vec3 skyCol;
 uniform vec3 camPos;
-uniform vec3 rimCol;
 uniform vec3 fogCol;
 uniform vec3 lampPos;
 uniform vec3 lampCol;
 uniform vec2 fogRange;
-uniform float emissive;
 varying vec4 vC;
 void main() {
     vec3 w = (matModel * vec4(vertexPosition, 1.0)).xyz;
     vec3 off = vec3(0.0);
-    float k = vertexTexCoord.x * sway;
+    float k = vertexTexCoord.x;
     if (k > 0.0) {
         float s = sin(time * 2.3 + vertexTexCoord.y * 6.2831 + dot(w, vec3(0.9, 0.4, 0.7)));
         float g = sin(time * 0.7 + dot(w, vec3(0.2, 0.5, 0.3))) * 0.5 + 0.5;
@@ -259,20 +241,16 @@ void main() {
     w += off;
     vec3 n = normalize((matModel * vec4(vertexNormal, 0.0)).xyz);
     vec3 up = normalize(w);
-    vec3 base = vertexColor.rgb * colDiffuse.rgb;
+    vec3 base = vertexColor.rgb;
     float lit = smoothstep(-0.02, 0.07, dot(n, sunDir));
     float day = smoothstep(-0.28, 0.18, dot(up, sunDir));
     vec3 col = base * (mix(shadeCol, sunCol * 0.9, lit * day) + skyCol * (0.06 + 0.1 * (dot(n, up) * 0.5 + 0.5)));
     // Scenery has no rim light, and lamp light only while the lamp burns.
     if (lampCol.r > 0.0) {
-        vec3 l = lampPos - w;
-        float ld = length(l);
-        float lamp = max(0.0, 1.0 - ld / 2.3);
-        col += base * lampCol * lamp * lamp * (0.35 + 0.65 * max(dot(n, l / max(ld, 0.001)), 0.0));
+        col += lamp_light(base, n, lampPos - w, lampCol);
     }
-    col += base * emissive;
-    float f = clamp((length(camPos - w) - fogRange.x) / (fogRange.y - fogRange.x), 0.0, 1.0);
-    vC = vec4(mix(col, fogCol, f * f * 0.85), colDiffuse.a * vertexColor.a);
+    float f = fog_factor(camPos - w, fogRange);
+    vC = vec4(mix(col, fogCol, f * f * 0.85), vertexColor.a);
     gl_Position = mvp * vec4(vertexPosition + off, 1.0);
 }
 "#;
@@ -342,15 +320,22 @@ void main() {
     float lit = smoothstep(-0.02, 0.07, dot(n, sunDir));
     float day = smoothstep(-0.28, 0.18, dot(up, sunDir));
     vec3 col = base * (mix(shadeCol, sunCol * 0.9, lit * day) + skyCol * (0.06 + 0.1 * (dot(n, up) * 0.5 + 0.5)));
-    vec3 l = lampPos - vW;
-    float ld = length(l);
-    float lamp = max(0.0, 1.0 - ld / 2.3);
-    col += base * lampCol * lamp * lamp * (0.35 + 0.65 * max(dot(n, l / max(ld, 0.001)), 0.0));
+    col += lamp_light(base, n, lampPos - vW, lampCol);
     float rim = 1.0 - max(dot(n, normalize(camPos - vW)), 0.0);
     col += rimCol * smoothstep(0.62, 0.74, rim) * lit * day * 0.22;
     col += base * vC.a;
-    float f = clamp((length(camPos - vW) - fogRange.x) / (fogRange.y - fogRange.x), 0.0, 1.0);
+    float f = fog_factor(camPos - vW, fogRange);
     FRAG = vec4(mix(col, fogCol, f * 0.4), 1.0);
+}
+"#;
+
+const OUTLINE_GLSL: &str = r#"
+vec4 expand_outline(vec4 c, vec4 c2, float width) {
+    vec2 s = c2.xy / c2.w - c.xy / c.w;
+    float l = length(s);
+    s = l > 0.000001 ? s / l : vec2(0.0);
+    c.xy += s * width * vec2(2.0 / 640.0, 2.0 / 480.0) * c.w;
+    return c;
 }
 "#;
 
@@ -366,11 +351,7 @@ void main() {
     vec3 w = d + vec3(r0.w, r1.w, r2.w);
     vec4 c = mvp * vec4(w, 1.0);
     vec4 c2 = mvp * vec4(w + normalize(d) * 0.05, 1.0);
-    vec2 s = c2.xy / c2.w - c.xy / c.w;
-    float l = length(s);
-    s = l > 0.000001 ? s / l : vec2(0.0);
-    c.xy += s * width * vec2(2.0 / 640.0, 2.0 / 480.0) * c.w;
-    gl_Position = c;
+    gl_Position = expand_outline(c, c2, width);
 }
 "#;
 
@@ -382,6 +363,7 @@ pub struct Rig {
     pub mesh: Mesh,
     pub per: i32,
     pub per_tris: i32,
+    pub coarse: Option<(usize, f32)>,
 }
 
 /// The hero, skinned on the CPU (see `hero.rs`): textured, lit per pixel.
@@ -425,13 +407,10 @@ void main() {
     float lit = smoothstep(-0.02, 0.07, dot(n, sunDir));
     float day = smoothstep(-0.28, 0.18, dot(up, sunDir));
     vec3 col = base * (mix(shadeCol, sunCol * 0.95, lit * day) + skyCol * (0.08 + 0.12 * (dot(n, up) * 0.5 + 0.5)));
-    vec3 l = lampPos - vW;
-    float ld = length(l);
-    float lamp = max(0.0, 1.0 - ld / 2.3);
-    col += base * lampCol * lamp * lamp * (0.35 + 0.65 * max(dot(n, l / max(ld, 0.001)), 0.0));
+    col += lamp_light(base, n, lampPos - vW, lampCol);
     float rim = 1.0 - max(dot(n, normalize(camPos - vW)), 0.0);
     col += rimCol * smoothstep(0.6, 0.72, rim) * (0.25 + 0.75 * lit * day) * 0.3;
-    float f = clamp((length(camPos - vW) - fogRange.x) / (fogRange.y - fogRange.x), 0.0, 1.0);
+    float f = fog_factor(camPos - vW, fogRange);
     FRAG = vec4(mix(col, fogCol, f * 0.4), 1.0);
 }
 "#;
@@ -447,11 +426,7 @@ void main() {
     vec3 n = radial > 0.5 ? vertexPosition : vertexNormal;
     vec4 c = mvp * vec4(vertexPosition, 1.0);
     vec4 c2 = mvp * vec4(vertexPosition + normalize(n) * 0.05, 1.0);
-    vec2 d = c2.xy / c2.w - c.xy / c.w;
-    float l = length(d);
-    d = l > 0.000001 ? d / l : vec2(0.0);
-    c.xy += d * width * vec2(2.0 / 640.0, 2.0 / 480.0) * c.w;
-    gl_Position = c;
+    gl_Position = expand_outline(c, c2, width);
 }
 "#;
 
@@ -518,10 +493,14 @@ void main() {
         c.r = mix(c.r, texture2D(texture0, uv + o).r, 0.85);
         c.b = mix(c.b, texture2D(texture0, uv - o).b, 0.85);
     }
-    c += texture2D(bloom, uv).rgb * bloomAmt;
-    float p = texture2D(paper, uv * vec2(9.0, 6.75)).r;
-    c *= 1.0 + (p - 0.5) * 0.08 * paperAmt;
-    c = mix(c, c * vec3(1.03, 1.0, 0.95), paperAmt * 0.6);
+    if (bloomAmt > 0.0) {
+        c += texture2D(bloom, uv).rgb * bloomAmt;
+    }
+    if (paperAmt > 0.0) {
+        float p = texture2D(paper, uv * vec2(9.0, 6.75)).r;
+        c *= 1.0 + (p - 0.5) * 0.08 * paperAmt;
+        c = mix(c, c * vec3(1.03, 1.0, 0.95), paperAmt * 0.6);
+    }
     c *= 1.0 - vignette * smoothstep(0.16, 0.6, r2);
     c = mix(c, vec3(1.0), flash);
     FRAG = vec4(c, 1.0);
@@ -580,7 +559,7 @@ pub enum Ink {
 }
 
 struct Part {
-    vertex: bool,
+    surface_lod: Option<&'static str>,
     rig: Option<usize>,
     mesh: Mesh,
     m: Matrix,
@@ -617,8 +596,6 @@ pub struct Gl {
     pub outlines: Cell<bool>,
     /// The hero's outline costs several milliseconds on the handheld: high effects only.
     pub hero_ink: Cell<bool>,
-    /// Triangles submitted since last read, for the profiler.
-    pub tris: Cell<u64>,
 }
 
 fn material(shader: Shader) -> Material {
@@ -703,12 +680,12 @@ impl Gl {
     /// `scale` sizes the 3D scene target against the 640×480 canvas.
     pub fn new(scale: f32) -> Gl {
         let (sw, sh) = ((W as f32 * scale).round() as i32, (H as f32 * scale).round() as i32);
-        let lit = load(Some(LIT_VS), LIT_FS);
-        let outline = load(Some(OUTLINE_VS), OUTLINE_FS);
-        let litv = load(Some(LITV_VS), LITV_FS);
-        let skin = load(Some(SKIN_VS), SKIN_FS);
-        let rig = load(Some(&format!("{RIG_HEAD}{RIG_VS}")), RIG_FS);
-        let rig_outline = load(Some(&format!("{RIG_HEAD}{RIG_OUTLINE_VS}")), OUTLINE_FS);
+        let lit = load(Some(LIT_VS), &format!("{LIGHTING_GLSL}{LIT_FS}"));
+        let outline = load(Some(&format!("{OUTLINE_GLSL}{OUTLINE_VS}")), OUTLINE_FS);
+        let litv = load(Some(&format!("{LIGHTING_GLSL}{LITV_VS}")), LITV_FS);
+        let skin = load(Some(SKIN_VS), &format!("{LIGHTING_GLSL}{SKIN_FS}"));
+        let rig = load(Some(&format!("{RIG_HEAD}{RIG_VS}")), &format!("{LIGHTING_GLSL}{RIG_FS}"));
+        let rig_outline = load(Some(&format!("{OUTLINE_GLSL}{RIG_HEAD}{RIG_OUTLINE_VS}")), OUTLINE_FS);
         Gl {
             lit: Uniforms::new(lit),
             skin: Uniforms::new(skin),
@@ -736,37 +713,39 @@ impl Gl {
             ink_px: Cell::new(1.4),
             outlines: Cell::new(true),
             hero_ink: Cell::new(true),
-            tris: Cell::new(0),
         }
     }
 
     /// Sets the lighting every lit draw this frame uses.
     pub fn light(&self, l: &Lighting, time: f32) {
         for u in [&self.lit, &self.litv, &self.rig_u, &self.skin] {
-            self.light_one(u, l, time);
+            Self::light_one(u, l);
         }
-        // Scenery tiles hold grass: only blade tips have a sway weight.
-        self.litv.f("sway", 1.0);
+        for u in [&self.lit, &self.rig_u, &self.skin] {
+            u.v3("rimCol", vec3(l.rim));
+        }
+        self.litv.f("time", time);
+        self.litv.v3("pusher", l.pusher.arr());
+        self.litv.v3("wind", l.wind.arr());
+        self.lit.f("emissive", 0.0);
+        self.lit.f("fresnel", 0.0);
     }
 
-    fn light_one(&self, u: &Uniforms, l: &Lighting, time: f32) {
-        u.f("time", time);
+    fn light_one(u: &Uniforms, l: &Lighting) {
         u.v3("sunDir", l.sun.arr());
         u.v3("sunCol", vec3(l.sun_col));
         u.v3("shadeCol", vec3(l.shade));
         u.v3("skyCol", vec3(l.sky));
         u.v3("camPos", l.cam.arr());
-        u.v3("rimCol", vec3(l.rim));
         u.v3("fogCol", vec3(l.fog));
         u.v2("fogRange", [l.fog_range.0, l.fog_range.1]);
-        u.v3("pusher", l.pusher.arr());
-        u.v3("wind", l.wind.arr());
         u.v3("lampPos", l.lamp.arr());
         u.v3("lampCol", vec3(l.lamp_col));
-        u.f("sway", 0.0);
-        u.f("emissive", 0.0);
-        u.f("fresnel", 0.0);
-        u.f("uvGlow", 0.0);
+    }
+
+    fn submit(&self, mesh: Mesh, mat: Material, m: Matrix, lod: Option<&'static str>) {
+        crate::prof::mesh(mesh.triangleCount as u64, lod);
+        unsafe { ffi::DrawMesh(mesh, mat, m) };
     }
 
     /// Draws a mesh now with the lit shader.
@@ -775,58 +754,43 @@ impl Gl {
             return;
         }
         self.lit.f("emissive", emissive);
-        self.tris.set(self.tris.get() + mesh.triangleCount as u64);
-        unsafe {
-            (*self.lit_mat.maps).color = c;
-            crate::prof::count_draw();
-            ffi::DrawMesh(mesh, self.lit_mat, m);
-        }
+        unsafe { (*self.lit_mat.maps).color = c };
+        self.submit(mesh, self.lit_mat, m, None);
     }
 
     /// Queues a mesh; `flush` draws every queued fill, then every outline.
     pub fn part(&self, mesh: Mesh, m: Matrix, c: Color, e: f32, ink: Ink) {
         if mesh.vertexCount > 0 {
-            self.parts.borrow_mut().push(Part { vertex: false, rig: self.lod(self.rig_of(mesh), &m), mesh, m, c, e, ink });
+            self.parts.borrow_mut().push(Part { surface_lod: None, rig: self.rig_of(mesh, &m), mesh, m, c, e, ink });
         }
     }
 
-    /// Queues a large surface, lit per vertex.
-    pub fn surface(&self, mesh: Mesh, ink: Ink) {
+    /// Queues a world-space surface in draw order, lit per vertex.
+    pub fn surface(&self, mesh: Mesh, lod: &'static str) {
         if mesh.vertexCount > 0 {
-            self.parts.borrow_mut().push(Part { vertex: true, rig: None, mesh, m: crate::math::identity(), c: rgb(0xFFFFFF), e: 0.0, ink });
+            self.parts.borrow_mut().push(Part {
+                surface_lod: Some(lod), rig: None, mesh, m: crate::math::identity(), c: rgb(0xFFFFFF), e: 0.0, ink: Ink::None,
+            });
         }
     }
 
-    /// Draws a mesh now with the per-vertex lit shader.
-    pub fn draw_v(&self, mesh: Mesh, m: Matrix, c: Color) {
-        if mesh.vertexCount == 0 {
-            return;
-        }
-        self.tris.set(self.tris.get() + mesh.triangleCount as u64);
-        unsafe {
-            (*self.litv_mat.maps).color = c;
-            crate::prof::count_draw();
-            ffi::DrawMesh(mesh, self.litv_mat, m);
-        }
+    pub fn hero_outline_enabled(&self) -> bool {
+        self.outlines.get() && self.hero_ink.get() && !crate::prof::skip("heroink")
     }
 
-    /// Draws the hero's mesh (already skinned on the CPU), then its ink outline.
-    pub fn draw_skinned(&self, mesh: Mesh, ink: Mesh, m: Matrix, tex: Texture2D) {
-        self.tris.set(self.tris.get() + mesh.triangleCount as u64);
+    /// Draws the CPU-skinned hero mesh and the optional ink outline.
+    pub fn draw_skinned(&self, mesh: Mesh, ink: Option<Mesh>, m: Matrix, tex: Texture2D) {
         unsafe {
             (*self.skin_mat.maps).texture = tex;
             (*self.skin_mat.maps).color = rgb(0xFFFFFF);
-            crate::prof::count_draw();
-            ffi::DrawMesh(mesh, self.skin_mat, m);
-            if self.outlines.get() && self.hero_ink.get() && !crate::prof::skip("heroink") {
+            self.submit(mesh, self.skin_mat, m, None);
+            if let Some(ink) = ink {
                 (*self.outline_mat.maps).color = self.ink.get();
                 self.outline.f("width", self.ink_px.get());
                 self.outline.f("radial", 0.0);
                 ffi::rlSetCullFace(ffi::rlCullMode::RL_CULL_FACE_FRONT as i32);
-                crate::prof::count_draw();
-                ffi::DrawMesh(ink, self.outline_mat, m);
+                self.submit(ink, self.outline_mat, m, None);
                 ffi::rlSetCullFace(ffi::rlCullMode::RL_CULL_FACE_BACK as i32);
-                self.tris.set(self.tris.get() + ink.triangleCount as u64);
             }
         }
     }
@@ -842,65 +806,64 @@ impl Gl {
         *self.rigs.borrow_mut() = rigs;
     }
 
-    /// Balls smaller than this (largest semi-axis) use the coarse ball.
-    fn lod(&self, rig: Option<usize>, m: &Matrix) -> Option<usize> {
-        let len = |x: f32, y: f32, z: f32| (x * x + y * y + z * z).sqrt();
-        let size = len(m.m0, m.m1, m.m2).max(len(m.m4, m.m5, m.m6)).max(len(m.m8, m.m9, m.m10));
-        match rig {
-            Some(0) if size < 0.05 && self.rigs.borrow().len() > 5 => Some(5),
-            r => r,
-        }
-    }
-
-    fn rig_of(&self, mesh: Mesh) -> Option<usize> {
+    fn rig_of(&self, mesh: Mesh, m: &Matrix) -> Option<usize> {
         if mesh.vboId.is_null() {
             return None;
         }
         let id = unsafe { *mesh.vboId };
-        self.rigs.borrow().iter().position(|r| r.single == id)
+        let rigs = self.rigs.borrow();
+        let index = rigs.iter().position(|r| r.single == id)?;
+        if let Some((coarse, cutoff)) = rigs[index].coarse {
+            let len = |x: f32, y: f32, z: f32| (x * x + y * y + z * z).sqrt();
+            let size = len(m.m0, m.m1, m.m2).max(len(m.m4, m.m5, m.m6)).max(len(m.m8, m.m9, m.m10));
+            if size < cutoff {
+                return Some(coarse);
+            }
+        }
+        Some(index)
     }
 
-    /// Draws `list` (all of rig `r`) in batches of RIG_N with `mat`.
-    fn draw_rig(&self, r: &Rig, list: &[&Part], u: &Uniforms, mat: Material) {
-        let mut bones: Vec<[f32; 4]> = Vec::with_capacity(RIG_N * 4);
-        for chunk in list.chunks(RIG_N) {
-            bones.clear();
-            for p in chunk {
+    /// Draws parts of one rig in batches of up to RIG_N.
+    fn draw_rig<'a>(&self, r: &Rig, mut parts: impl Iterator<Item = &'a Part>, u: &Uniforms, mat: Material) {
+        let mut bones = [[[0.0; 4]; 4]; RIG_N];
+        loop {
+            let mut count = 0;
+            for (rows, p) in bones.iter_mut().zip(parts.by_ref()) {
                 let m = p.m;
-                bones.push([m.m0, m.m4, m.m8, m.m12]);
-                bones.push([m.m1, m.m5, m.m9, m.m13]);
-                bones.push([m.m2, m.m6, m.m10, m.m14]);
                 let c = vec3(p.c);
-                bones.push([c[0], c[1], c[2], p.e]);
+                *rows = [
+                    [m.m0, m.m4, m.m8, m.m12],
+                    [m.m1, m.m5, m.m9, m.m13],
+                    [m.m2, m.m6, m.m10, m.m14],
+                    [c[0], c[1], c[2], p.e],
+                ];
+                count += 1;
             }
-            let loc = u.loc("bones");
+            if count == 0 {
+                break;
+            }
             let mut mesh = r.mesh;
-            mesh.vertexCount = r.per * chunk.len() as i32;
-            mesh.triangleCount = r.per_tris * chunk.len() as i32;
-            self.tris.set(self.tris.get() + mesh.triangleCount as u64);
+            mesh.vertexCount = r.per * count;
+            mesh.triangleCount = r.per_tris * count;
             unsafe {
-                ffi::SetShaderValueV(u.shader, loc, bones.as_ptr() as _, ffi::ShaderUniformDataType::SHADER_UNIFORM_VEC4 as i32, bones.len() as i32);
-                crate::prof::count_draw();
-            ffi::DrawMesh(mesh, mat, crate::math::identity());
+                ffi::SetShaderValueV(u.shader, u.loc("bones"), bones.as_ptr() as _, ffi::ShaderUniformDataType::SHADER_UNIFORM_VEC4 as i32, count * 4);
             }
+            self.submit(mesh, mat, crate::math::identity(), None);
         }
     }
 
     pub fn flush(&self) {
-        let parts = std::mem::take(&mut *self.parts.borrow_mut());
-        let rigs = self.rigs.borrow().clone();
-        // Front to back for early depth rejection: characters were queued last.
-        for p in parts.iter().rev().filter(|p| p.rig.is_none()) {
-            if p.vertex {
-                self.draw_v(p.mesh, p.m, p.c);
-            } else {
-                self.draw(p.mesh, p.m, p.c, p.e);
-            }
+        let mut parts = self.parts.borrow_mut();
+        let rigs = self.rigs.borrow();
+        for p in parts.iter().rev().filter(|p| p.rig.is_none() && p.surface_lod.is_none()) {
+            self.draw(p.mesh, p.m, p.c, p.e);
+        }
+        for p in parts.iter().filter(|p| p.surface_lod.is_some()) {
+            self.submit(p.mesh, self.litv_mat, p.m, p.surface_lod);
         }
         self.lit.f("emissive", 0.0);
         for (k, r) in rigs.iter().enumerate() {
-            let list: Vec<&Part> = parts.iter().filter(|p| p.rig == Some(k)).collect();
-            self.draw_rig(r, &list, &self.rig_u, self.rig_mat);
+            self.draw_rig(r, parts.iter().filter(|p| p.rig == Some(k)), &self.rig_u, self.rig_mat);
         }
         if self.outlines.get() {
             unsafe {
@@ -917,19 +880,14 @@ impl Gl {
                     self.outline.f("radial", if r { 1.0 } else { 0.0 });
                     radial = Some(r);
                 }
-                self.tris.set(self.tris.get() + p.mesh.triangleCount as u64);
-                unsafe { crate::prof::count_draw();
-            ffi::DrawMesh(p.mesh, self.outline_mat, p.m) };
+                self.submit(p.mesh, self.outline_mat, p.m, None);
             }
             for (k, r) in rigs.iter().enumerate() {
-                let list: Vec<&Part> = parts.iter().filter(|p| p.rig == Some(k) && p.ink != Ink::None).collect();
-                self.draw_rig(r, &list, &self.rig_outline, self.rig_outline_mat);
+                self.draw_rig(r, parts.iter().filter(|p| p.rig == Some(k) && p.ink != Ink::None), &self.rig_outline, self.rig_outline_mat);
             }
             unsafe { ffi::rlSetCullFace(ffi::rlCullMode::RL_CULL_FACE_BACK as i32) };
         }
-        let mut back = parts;
-        back.clear();
-        *self.parts.borrow_mut() = back;
+        parts.clear();
     }
 
     /// A see-through glass shape that brightens towards its edges.
