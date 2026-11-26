@@ -1,0 +1,13 @@
+name: CI
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  placeholder:
+    name: Build and test pending
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "CI will be configured after the game lands on main."
