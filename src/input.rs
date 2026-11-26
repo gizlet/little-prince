@@ -2,7 +2,8 @@
 //! handheld's own evdev devices, merged into one pad each frame.
 //!
 //! Keyboard: arrows or WASD move; Space, Enter or K is A; Backspace or J is B;
-//! I is X; U is Y; Q and E are L1 and R1; Esc or P is Start; Tab is Select.
+//! I is X; U is Y; Esc or P is Start; Tab is Select. Q/E and R/F turn the
+//! camera like the right stick.
 
 use raylib_sys::{self as ffi, GamepadAxis as Axis, GamepadButton as G, KeyboardKey as K};
 
@@ -51,7 +52,7 @@ impl RawPad {
     }
 }
 
-const KEYS: [(K, Button); 20] = [
+const KEYS: [(K, Button); 18] = [
     (K::KEY_UP, Button::Up),
     (K::KEY_W, Button::Up),
     (K::KEY_DOWN, Button::Down),
@@ -70,8 +71,6 @@ const KEYS: [(K, Button); 20] = [
     (K::KEY_ESCAPE, Button::Start),
     (K::KEY_P, Button::Start),
     (K::KEY_TAB, Button::Select),
-    (K::KEY_Q, Button::L1),
-    (K::KEY_E, Button::R1),
 ];
 
 const PAD: [(G, Button); 12] = [
@@ -112,6 +111,7 @@ pub struct Controls {
     held: [f32; 4],
     repeat: [bool; 4],
     stick: (f32, f32),
+    look: (f32, f32),
     swap_ab: bool,
     #[cfg(all(target_os = "linux", feature = "gizlet-os"))]
     evdev: crate::evdev::Evdev,
@@ -125,6 +125,7 @@ impl Controls {
             held: [0.0; 4],
             repeat: [false; 4],
             stick: (0.0, 0.0),
+            look: (0.0, 0.0),
             swap_ab: std::env::var("GIZLET_SWAP_AB").is_ok_and(|v| v == "1"),
             #[cfg(all(target_os = "linux", feature = "gizlet-os"))]
             evdev: crate::evdev::Evdev::default(),
@@ -167,6 +168,14 @@ impl Controls {
                     if y.abs() > pad.axes[1].abs() {
                         pad.axes[1] = y;
                     }
+                    let rx = ffi::GetGamepadAxisMovement(g, Axis::GAMEPAD_AXIS_RIGHT_X as i32);
+                    let ry = ffi::GetGamepadAxisMovement(g, Axis::GAMEPAD_AXIS_RIGHT_Y as i32);
+                    if rx.abs() > pad.axes[2].abs() {
+                        pad.axes[2] = rx;
+                    }
+                    if ry.abs() > pad.axes[3].abs() {
+                        pad.axes[3] = ry;
+                    }
                 }
             }
         }
@@ -175,6 +184,25 @@ impl Controls {
         }
         let (x, y) = (pad.axes[0], pad.axes[1]);
         self.stick = if x.hypot(y) > 0.22 { (x, y) } else { (0.0, 0.0) };
+        // The right stick turns the camera; past the dead zone it ramps up
+        // from zero so small pushes give fine control.
+        let (rx, ry) = (pad.axes[2], pad.axes[3]);
+        let m = rx.hypot(ry);
+        self.look = if m > 0.18 {
+            let k = ((m - 0.18) / 0.82).min(1.0);
+            let k = k * k / m;
+            (rx * k, ry * k)
+        } else {
+            (0.0, 0.0)
+        };
+        unsafe {
+            let key = |k: K| ffi::IsKeyDown(k as i32) as i32 as f32;
+            let kx = key(K::KEY_E) - key(K::KEY_Q);
+            let ky = key(K::KEY_F) - key(K::KEY_R);
+            if kx != 0.0 || ky != 0.0 {
+                self.look = (kx, ky);
+            }
+        }
         // The stick also steers menus.
         if y < -0.6 {
             pad.set(Button::Up);
@@ -207,6 +235,11 @@ impl Controls {
     #[allow(dead_code)]
     pub fn nav(&self, b: Button) -> bool {
         self.pressed(b) || DIRS.iter().position(|d| *d == b).is_some_and(|i| self.repeat[i])
+    }
+
+    /// The camera stick: right (+x) and down (+y), each -1..1.
+    pub fn look(&self) -> (f32, f32) {
+        self.look
     }
 
     /// The walking direction: the stick when it is pushed, else the D-pad.

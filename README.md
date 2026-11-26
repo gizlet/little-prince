@@ -41,7 +41,7 @@ cargo run --release
 | Arrows or WASD | D-pad / stick | Walk |
 | Space, Enter or K | A | Jump; start on the title |
 | I | X | Fly to the next planet |
-| Q / E | L1 / R1 | Turn the camera |
+| Q / E, R / F | Right stick | Turn the camera left and right, up and down |
 | U | Y | Effects: high, mid, low |
 | Tab | Select | Show or hide the stats |
 | Esc or P | Start | 中文 / English |

@@ -27,6 +27,10 @@ pub enum Mode {
 const LEAVE: f32 = 1.9;
 const ARRIVE: f32 = 2.2;
 const BIRDS: usize = 9;
+/// The camera's resting height angle and its limits, in radians.
+const PITCH: f32 = 0.26;
+const PITCH_MIN: f32 = -0.2;
+const PITCH_MAX: f32 = 1.2;
 /// The default hero model and its height in world units.
 const HERO: &str = "Rogue_Hooded";
 pub const HERO_H: f32 = 0.42;
@@ -87,6 +91,10 @@ pub struct App {
     pub quit: bool,
     cam: Cam,
     cam_fwd: V3,
+    /// The camera's height angle above the hero, in radians.
+    cam_pitch: f32,
+    /// Seconds since the player last turned the camera by hand.
+    look_t: f32,
     fly_to: usize,
     switched: bool,
     demo_dir: V3,
@@ -132,6 +140,8 @@ impl App {
             quit: false,
             cam: Cam { pos: p * 3.0, target: p, up: p.norm() },
             cam_fwd,
+            cam_pitch: PITCH,
+            look_t: 10.0,
             fly_to: 0,
             switched: false,
             demo_dir: cam_fwd,
@@ -238,7 +248,9 @@ impl App {
             self.quit_hold = 0.0;
         }
         let (mx, my) = c.movement();
-        let any = ANY.iter().any(|b| c.pressed(*b)) || mx != 0.0 || my != 0.0;
+        let (lx, ly) = c.look();
+        let any = ANY.iter().any(|b| c.pressed(*b)) || mx != 0.0 || my != 0.0 || lx != 0.0 || ly != 0.0;
+        self.look_t += dt;
         let mut input = !combo;
         if any {
             self.idle_t = 0.0;
@@ -287,8 +299,13 @@ impl App {
                     }
                     wish = self.cam_fwd * -my + self.cam_fwd.cross(n) * mx;
                     jump = c.pressed(Button::A);
-                    let yaw = (c.down(Button::L1) as i32 - c.down(Button::R1) as i32) as f32;
-                    self.cam_fwd = self.cam_fwd.rotate(n, yaw * 2.0 * dt);
+                    // Right stick: left/right orbits the camera round the
+                    // hero, up/down raises or lowers it (stick up looks up).
+                    if lx != 0.0 || ly != 0.0 {
+                        self.look_t = 0.0;
+                        self.cam_fwd = self.cam_fwd.rotate(n, -lx * 2.6 * dt);
+                        self.cam_pitch = (self.cam_pitch + ly * 1.6 * dt).clamp(PITCH_MIN, PITCH_MAX);
+                    }
                 }
             }
             Mode::Fly => self.update_flight(),
@@ -308,7 +325,9 @@ impl App {
         let sp = self.player.speed();
         if sp > 0.3 {
             let want = self.player.vel.norm();
-            if self.demo || want.dot(self.cam_fwd) > -0.2 {
+            // Follow the walking direction, but not right after the player
+            // turned the camera by hand.
+            if self.demo || (want.dot(self.cam_fwd) > -0.2 && self.look_t > 1.5) {
                 let rate = if self.demo { 1.4 } else { 0.9 } * (sp / SPEED);
                 let angle = self.cam_fwd.cross(want).dot(n).atan2(self.cam_fwd.dot(want));
                 self.cam_fwd = self.cam_fwd.rotate(n, angle * (1.0 - (-rate * dt).exp())).norm();
@@ -427,7 +446,19 @@ impl App {
             }
             Mode::Play => {
                 let rate = 1.6 + 4.4 * smooth(self.mode_t / 1.8);
-                (p + n * 0.8 - f * 2.2, p + n * 0.22 + f * 1.3, rate)
+                let e = if self.demo { PITCH } else { self.cam_pitch };
+                let pivot = p + n * 0.3;
+                let mut pos = pivot + (n * e.sin() - f * e.cos()) * 2.3;
+                // Looking down from above, aim at the hero; looking up from
+                // low down, aim ahead and up at the sky.
+                let ahead = 1.2 * e.cos().max(0.0) * (1.0 - smooth((e - 0.4) / 0.8));
+                let target = p + n * (0.22 + (PITCH - e).max(0.0) * 2.5) + f * ahead;
+                // Never below the ground.
+                let floor = self.world().surface(pos.norm()) + 0.15;
+                if pos.len() < floor {
+                    pos = pos.norm() * floor;
+                }
+                (pos, target, rate.max(if self.look_t < 0.3 { 12.0 } else { 0.0 }))
             }
             Mode::Fly => {
                 let k = if self.mode_t < LEAVE { self.mode_t / LEAVE } else { 1.0 - clamp01((self.mode_t - LEAVE) / ARRIVE) };

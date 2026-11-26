@@ -236,7 +236,7 @@ fn bar(app: &App) {
     let items: [(&str, &str); 7] = [
         ("A", s(T::Jump, l)),
         ("X", s(T::Travel, l)),
-        ("L/R", s(T::Camera, l)),
+        (s(T::RStick, l), s(T::Camera, l)),
         ("Y", &effects),
         ("Select", s(T::Stats, l)),
         ("Start", s(T::Lang, l)),

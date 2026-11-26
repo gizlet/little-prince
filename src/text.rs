@@ -46,6 +46,7 @@ pub enum T {
     Jump,
     Travel,
     Camera,
+    RStick,
     Effects,
     Stats,
     Lang,
@@ -61,7 +62,7 @@ pub enum T {
     Free,
 }
 
-const ALL: [T; 33] = [
+const ALL: [T; 34] = [
     T::Title,
     T::Subtitle,
     T::PressStart,
@@ -82,6 +83,7 @@ const ALL: [T; 33] = [
     T::Jump,
     T::Travel,
     T::Camera,
+    T::RStick,
     T::Effects,
     T::Stats,
     T::Lang,
@@ -119,6 +121,7 @@ pub fn s(t: T, l: Lang) -> &'static str {
         T::Jump => ("跳跃", "Jump"),
         T::Travel => ("下一颗星球", "Next planet"),
         T::Camera => ("视角", "Camera"),
+        T::RStick => ("右摇杆", "R-stick"),
         T::Effects => ("特效", "Effects"),
         T::Stats => ("性能", "Stats"),
         T::Lang => ("English", "中文"),
