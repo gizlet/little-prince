@@ -1,0 +1,40 @@
+#!/bin/sh
+# scripts/package.sh [OUT]: builds the Little Prince demo for aarch64 Gizlet OS and
+# assembles the app folder that `gizlet install` takes (dist/littleprince by
+# default).
+#
+# Needs zig, the Rust target aarch64-unknown-linux-gnu and Gizlet runtime 1's
+# libraylib.so: set GIZLET_RAYLIB_LIB to the folder holding it. gizlet/os
+# builds it with `bazel build --config=r36s //runtime:raylib`.
+set -eu
+root=$(cd "$(dirname "$0")/.." && pwd)
+out=${1:-$root/dist/littleprince}
+target=aarch64-unknown-linux-gnu
+
+: "${GIZLET_RAYLIB_LIB:?set GIZLET_RAYLIB_LIB to the folder holding runtime 1 libraylib.so}"
+[ -f "$GIZLET_RAYLIB_LIB/libraylib.so" ] || { echo "no libraylib.so in $GIZLET_RAYLIB_LIB" >&2; exit 1; }
+
+# bindgen reads raylib.h for the device: give it zig's glibc headers.
+zig_lib=$(zig env | sed -n -e 's/.*\.lib_dir = "\(.*\)".*/\1/p' -e 's/.*"lib_dir": *"\([^"]*\)".*/\1/p')
+inc=$zig_lib/libc/include
+[ -d "$inc/generic-glibc" ] || { echo "zig's glibc headers are missing under $inc" >&2; exit 1; }
+export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="$root/scripts/zig-cc"
+export CC_aarch64_unknown_linux_gnu="$root/scripts/zig-cc"
+export BINDGEN_EXTRA_CLANG_ARGS_aarch64_unknown_linux_gnu="-isystem $inc/aarch64-linux-gnu -isystem $inc/generic-glibc -isystem $inc/any-linux-any"
+
+cd "$root"
+cargo build --release --locked --target "$target" --features gizlet-os
+
+rm -rf "$out"
+mkdir -p "$out/bin" "$out/licenses"
+cp "target/$target/release/littleprince" "$out/bin/littleprince"
+cp gizlet.toml "$out/gizlet.toml"
+cp assets/icon.png "$out/icon.png"
+cp LICENSE "$out/licenses/littleprince-MIT.txt"
+mkdir -p "$out/assets/hero"
+cp assets/hero/Rogue_Hooded.glb "$out/assets/hero/"
+cp assets/hero/KayKit-LICENSE.txt "$out/licenses/kaykit-adventurers-CC0.txt"
+cp assets/fonts/Inter-OFL.txt "$out/licenses/inter-OFL.txt"
+cp assets/fonts/SpaceGrotesk-OFL.txt "$out/licenses/space-grotesk-OFL.txt"
+cp assets/fonts/DroidSansFallback-LICENSE.txt "$out/licenses/droid-sans-fallback-Apache-2.0.txt"
+echo "$out"

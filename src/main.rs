@@ -1,0 +1,204 @@
+//! The Little Prince · 小王子: a 3D planet-walk demo for Gizlet OS
+//! handhelds in Rust + raylib. The hero walks B612, the lamplighter's
+//! planet and the desert where the fox is tamed, and migrating birds carry
+//! it between them; the HUD shows FPS, CPU load and free memory.
+//!
+//! The planets follow Antoine de Saint-Exupéry's book. The hero is KayKit
+//! Adventurers' hooded Rogue by Kay Lousberg (CC0); every other model and
+//! effect here is written from scratch and made in code.
+//!
+//! Environment:
+//! - `GIZLET_LANG=en`: start in English (Simplified Chinese otherwise).
+//! - `GIZLET_SWAP_AB=1`: swap the A and B buttons.
+//! - `LITTLEPRINCE_WINDOW=WxH`: the desktop window size (default 1280x960).
+//! - `LITTLEPRINCE_DEMO=1`: start the demo autopilot at once.
+//! - `LITTLEPRINCE_MUTE=1`: no sound.
+//! - `LITTLEPRINCE_CAPTURE=FILE.png` with `LITTLEPRINCE_SCENE` (`title`, `icon`,
+//!   `b612`, `lamp`, `desert`, `fly`) and `LITTLEPRINCE_AT` (seconds of demo first):
+//!   render one frame to a PNG and exit.
+
+mod app;
+#[cfg(all(target_os = "linux", feature = "gizlet-os"))]
+mod evdev;
+mod fx;
+mod gl;
+mod hero;
+mod hud;
+mod input;
+mod math;
+mod mesh;
+mod player;
+mod prof;
+mod sound;
+mod stats;
+mod text;
+mod world;
+
+use app::{App, Mode};
+use raylib_sys::{self as ffi, Camera2D, ConfigFlags as F, Rectangle, Vector2};
+use std::ffi::CString;
+
+/// Without a window system: raylib's DRM platform on the whole panel.
+const KMS: bool = cfg!(feature = "gizlet-os");
+
+fn env_size(name: &str) -> Option<(i32, i32)> {
+    let v = std::env::var(name).ok()?;
+    let (w, h) = v.split_once('x')?;
+    Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
+}
+
+fn env_on(name: &str) -> bool {
+    std::env::var(name).is_ok_and(|v| v == "1")
+}
+
+/// Where the 640×480 canvas goes on the screen, letterboxed.
+fn view() -> (Rectangle, f32) {
+    let (sw, sh) = unsafe { (ffi::GetRenderWidth() as f32, ffi::GetRenderHeight() as f32) };
+    let k = (sw / gl::W as f32).min(sh / gl::H as f32);
+    let (w, h) = (gl::W as f32 * k, gl::H as f32 * k);
+    (Rectangle { x: ((sw - w) / 2.0).floor(), y: ((sh - h) / 2.0).floor(), width: w, height: h }, k)
+}
+
+fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--version") {
+        println!("littleprince {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+    let capture = std::env::var("LITTLEPRINCE_CAPTURE").ok();
+    let (w, h) = if KMS { (0, 0) } else { env_size("LITTLEPRINCE_WINDOW").unwrap_or((1280, 960)) };
+    let mut flags = F::FLAG_VSYNC_HINT as u32;
+    if !KMS {
+        flags |= F::FLAG_WINDOW_RESIZABLE as u32;
+    }
+    if capture.is_some() {
+        flags |= F::FLAG_WINDOW_HIDDEN as u32;
+    }
+    unsafe {
+        ffi::SetTraceLogLevel(if KMS { ffi::TraceLogLevel::LOG_INFO } else { ffi::TraceLogLevel::LOG_WARNING } as i32);
+        ffi::SetConfigFlags(flags);
+        ffi::InitWindow(w, h, c"The Little Prince · 小王子".as_ptr());
+        if !ffi::IsWindowReady() {
+            eprintln!("littleprince: the display could not be opened");
+            std::process::exit(1);
+        }
+        ffi::SetExitKey(0);
+        ffi::SetTargetFPS(60);
+        ffi::rlSetClipPlanes(0.05, 150.0);
+        if !KMS {
+            ffi::SetWindowMinSize(320, 240);
+        }
+    }
+    // Sound is a bonus: a device without audio still plays.
+    let audio = capture.is_none()
+        && !env_on("LITTLEPRINCE_MUTE")
+        && unsafe {
+            ffi::InitAudioDevice();
+            ffi::IsAudioDeviceReady()
+        };
+    let lang = if std::env::var("GIZLET_LANG").is_ok_and(|v| v.starts_with("en")) { text::Lang::En } else { text::Lang::Zh };
+    let zoom = view().1.max(1.0);
+    let mut controls = input::Controls::new();
+    let mut app = App::new(lang, zoom, audio);
+    if env_on("LITTLEPRINCE_DEMO") {
+        app.demo = true;
+        app.start_play(0);
+    }
+    if capture.is_some() {
+        setup_capture(&mut app, &controls);
+    }
+
+    if let Ok(v) = std::env::var("LITTLEPRINCE_PROFILE") {
+        prof::enable(v != "2");
+    }
+    let start = unsafe { ffi::GetTime() };
+    while !unsafe { ffi::WindowShouldClose() } && !app.quit {
+        let dt = if capture.is_some() { 1.0 / 60.0 } else { unsafe { ffi::GetFrameTime() }.min(0.1) };
+        let now = unsafe { ffi::GetTime() } - start;
+        controls.poll(dt, now);
+        if capture.is_none() {
+            app.update(dt, &controls);
+        }
+        prof::mark("update");
+        app.render();
+        let (dest, k) = view();
+        if app.hud {
+            hud::prepare(&app, k);
+        }
+        unsafe {
+            ffi::BeginDrawing();
+            ffi::ClearBackground(gl::rgb(0x000000));
+        }
+        app.present(dest);
+        prof::mark("post");
+        unsafe {
+            ffi::BeginMode2D(Camera2D { offset: Vector2 { x: dest.x, y: dest.y }, target: Vector2 { x: 0.0, y: 0.0 }, rotation: 0.0, zoom: k });
+        }
+        if app.hud {
+            hud::draw(&app);
+        }
+        unsafe { ffi::EndMode2D() };
+        prof::mark("hud");
+        if let Some(path) = &capture {
+            unsafe {
+                ffi::rlDrawRenderBatchActive();
+                let image = ffi::LoadImageFromScreen();
+                if let Ok(c) = CString::new(path.as_str()) {
+                    ffi::ExportImage(image, c.as_ptr());
+                }
+                ffi::UnloadImage(image);
+                ffi::EndDrawing();
+            }
+            break;
+        }
+        unsafe { ffi::EndDrawing() };
+        prof::mark("swap");
+        if prof::on() {
+            prof::frame(&format!("{:?} fx{} parts{} tris{}k", app.world().kind, app.fx_level, app.fx.count(), app.gl.tris.take() / 1000));
+        }
+    }
+    unsafe { ffi::CloseWindow() };
+}
+
+/// Plays the scene a capture asks for, at a fixed 60 steps a second.
+fn setup_capture(app: &mut App, c: &input::Controls) {
+    let scene = std::env::var("LITTLEPRINCE_SCENE").unwrap_or_else(|_| "b612".into());
+    let at: f32 = std::env::var("LITTLEPRINCE_AT").ok().and_then(|v| v.parse().ok()).unwrap_or(8.0);
+    let step = |app: &mut App, secs: f32| {
+        for _ in 0..(secs * 60.0) as usize {
+            app.update(1.0 / 60.0, c);
+        }
+    };
+    match scene.as_str() {
+        "title" => step(app, at.min(6.0)),
+        "icon" => {
+            app.hud = false;
+            step(app, 3.0);
+        }
+        "model" => {
+            app.hud = false;
+            app.closeup = true;
+            if let Some(h) = &mut app.hero {
+                let d = h.check_against_raylib();
+                eprintln!("hero {}: bone matrices differ from raylib by at most {d:.6}", h.name);
+            }
+            app.start_play(0);
+            step(app, at);
+        }
+        "b612" | "lamp" | "desert" | "fly" => {
+            let idx = match scene.as_str() {
+                "lamp" => 1,
+                "desert" => 2,
+                _ => 0,
+            };
+            app.demo = true;
+            app.start_play(idx);
+            step(app, at);
+            if scene == "fly" {
+                app.begin_flight();
+                step(app, 1.5);
+            }
+            assert!(app.mode != Mode::Title);
+        }
+        other => eprintln!("littleprince: unknown scene {other}"),
+    }
+}
