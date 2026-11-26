@@ -53,14 +53,24 @@ pub fn vec3(c: Color) -> [f32; 3] {
 }
 
 fn source(vertex: bool, body: &str) -> CString {
-    let head = match (GLES, vertex) {
-        (true, true) => "#version 100\n",
-        (true, false) => concat!(
+    // The shaders are written in GLSL ES 1.00 style. They are compiled as the
+    // language of the context raylib made, because a program cannot mix
+    // versions, and raylib's own default shaders (paired with ours in the
+    // full-screen passes) follow its context: ES 2, ES 3 or desktop GL 3.3.
+    let es3 = unsafe { ffi::rlGetVersion() } == ffi::rlGlVersion::RL_OPENGL_ES_30 as i32;
+    let head = match (GLES, es3, vertex) {
+        (true, false, true) => "#version 100\n",
+        (true, false, false) => concat!(
             "#version 100\n#ifdef GL_FRAGMENT_PRECISION_HIGH\nprecision highp float;\n#else\nprecision mediump float;\n#endif\n",
             "#define FRAG gl_FragColor\n"
         ),
-        (false, true) => "#version 330\n#define attribute in\n#define varying out\n#define texture2D texture\n",
-        (false, false) => "#version 330\n#define varying in\n#define texture2D texture\nout vec4 fragOut;\n#define FRAG fragOut\n",
+        (true, true, true) => "#version 300 es\n#define attribute in\n#define varying out\n#define texture2D texture\n",
+        (true, true, false) => concat!(
+            "#version 300 es\nprecision highp float;\n#define varying in\n#define texture2D texture\n",
+            "out vec4 fragOut;\n#define FRAG fragOut\n"
+        ),
+        (false, _, true) => "#version 330\n#define attribute in\n#define varying out\n#define texture2D texture\n",
+        (false, _, false) => "#version 330\n#define varying in\n#define texture2D texture\nout vec4 fragOut;\n#define FRAG fragOut\n",
     };
     CString::new(format!("{head}{body}")).expect("shader source")
 }

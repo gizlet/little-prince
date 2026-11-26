@@ -70,7 +70,7 @@ cargo test
 
 ## Run on Gizlet OS
 
-On the device the game links Gizlet runtime 1's `libraylib.so.600`, built for DRM with OpenGL ES 2, and reads the handheld's buttons from evdev. `scripts/package.sh` cross-builds it from a Mac with zig as the linker and assembles the app folder.
+On the device the game links Gizlet runtime 1's `libraylib.so.600`, built for DRM with OpenGL ES 3.0 (ES 2 runtimes work too; the shaders follow the context raylib makes), and reads the handheld's buttons from evdev. `scripts/package.sh` cross-builds it from a Mac with zig as the linker and assembles the app folder.
 
 Requirements: [zig](https://ziglang.org), `rustup target add aarch64-unknown-linux-gnu`, and runtime 1's `libraylib.so`, built in [gizlet/os](https://github.com/gizlet/os) with `bazel build --config=r36s //runtime:raylib`.
 

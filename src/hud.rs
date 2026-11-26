@@ -302,7 +302,12 @@ fn stats(app: &App) {
         sys += &format!(" · {m:.0} MHz");
     }
     line(2.0, &sys);
-    let backend = if cfg!(feature = "gizlet-os") { "GLES 2 · DRM" } else { "OpenGL 3.3" };
+    let backend = match unsafe { ffi::rlGetVersion() } {
+        v if v == ffi::rlGlVersion::RL_OPENGL_ES_30 as i32 => "GLES 3",
+        v if v == ffi::rlGlVersion::RL_OPENGL_ES_20 as i32 => "GLES 2",
+        _ => "OpenGL 3.3",
+    };
+    let backend = if cfg!(feature = "gizlet-os") { format!("{backend} · DRM") } else { backend.to_string() };
     let fx = [T::FxLow, T::FxMid, T::FxHigh][app.fx_level as usize];
     line(3.0, &format!("{backend} · 640×480 · {} {}", s(T::Effects, l), s(fx, l)));
 }
