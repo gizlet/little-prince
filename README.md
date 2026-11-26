@@ -77,8 +77,8 @@ Install Python 3.11 or newer, [zig](https://ziglang.org), and the Rust `aarch64-
 
 ```sh
 GIZLET_RAYLIB_LIB=/path/to/folder/with/libraylib.so scripts/package.sh
-scp dist/io.gizlet.littleprince-0.2.1-aarch64-unknown-linux-gnu-lite.gzl root@DEVICE:/tmp/
-ssh root@DEVICE 'gizlet install /tmp/io.gizlet.littleprince-0.2.1-aarch64-unknown-linux-gnu-lite.gzl'
+scp dist/io.gizlet.littleprince-0.2.2-aarch64-unknown-linux-gnu-lite.gzl root@DEVICE:/tmp/
+ssh root@DEVICE 'gizlet install /tmp/io.gizlet.littleprince-0.2.2-aarch64-unknown-linux-gnu-lite.gzl'
 ```
 
 Open the game from the launcher. To publish a release, update the version in

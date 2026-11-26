@@ -3,3 +3,8 @@
 *.glb filter=lfs diff=lfs merge=lfs -text
 *.ttf filter=lfs diff=lfs merge=lfs -text
 assets/icon.png !filter !diff !merge -text
+/store/cover.jpg !filter !diff !merge -text
+/docs/screenshots/b612.png !filter !diff !merge -text
+/docs/screenshots/desert.png !filter !diff !merge -text
+/docs/screenshots/fly.png !filter !diff !merge -text
+/docs/screenshots/lamp.png !filter !diff !merge -text
