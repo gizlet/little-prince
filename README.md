@@ -84,18 +84,15 @@ Stop the launcher first (`systemctl stop gizlet-session`) so the demo gets the s
 
 ### Performance on the R36S
 
-On a genuine R36S (RK3326, Mali-G31 through Panfrost, Mesa 25.0) B612 runs at about 15–16 fps with about 52,000 triangles a frame, using about 140 MB of memory. Measured with `LITTLEPRINCE_SKIP`:
+On a genuine R36S (RK3326, Mali-G31 through Panfrost, Mesa 25.0) B612 runs at about 50 fps at the default (mid) effects level, with about 35,000 triangles a frame and about 140 MB of memory. The main thread spends about 18 ms of CPU time per frame; the high effects level (bloom, paper, the hero's outline) costs about 18 ms more.
 
-| Left out | fps |
-| --- | --- |
-| Nothing | 14.9 |
-| The hero | 18.1 |
-| Grass | 17.7 |
-| Trees, bushes and rocks | 18.0 |
-| Ground | 17.1 |
-| All of the above | 28.2 |
+The biggest single win was giving raylib's render batch 48 buffers in rotation instead of one (`rlLoadRenderBatch`, set with `LITTLEPRINCE_BATCH`). With one buffer, every batch flush rewrites a vertex buffer the GPU is still reading, and Panfrost makes the CPU wait for the GPU each time: about 25 ms a frame went to those waits, and the demo ran at 22 fps. The hero's skinned mesh is double-buffered for the same reason.
 
-What has helped so far: batching the small character parts into a few draw calls, indexed meshes, cheaper small parts, lighting the scenery per vertex, chunking the planets so only what is in front of the camera and above the horizon is drawn, a HUD redrawn four times a second, and no ink outline on scenery. Still to do: drop the extra full-screen passes (rendering to a texture and copying it out, the full-screen HUD layer), a cheaper scenery shader, and skinning the hero on the CPU.
+Other changes that helped: batching small character parts into a few draw calls, indexed meshes, cheaper small parts and far-away scenery, lighting scenery per vertex without rim light, chunking the planets so only what is in front of the camera and above the horizon is drawn, skinning the hero on the CPU, drawing straight to the screen below the high effects level, drawing opaque things without blending, the sky after the solids, and a HUD redrawn four times a second and blitted only where it holds something.
+
+`LITTLEPRINCE_PROFILE=2` prints the frame time, the CPU time before the frame is handed over (`cpu`) and the main thread's CPU time (`thread-cpu`); `1` also splits it into stages, waiting for the GPU after each; `3` splits it without waiting. `LITTLEPRINCE_SKIP=hero,grass,props,flowers,ground,heroink,skin` leaves parts out to measure their cost.
+
+The sky backdrop and the stars are drawn 26–30 units from the camera, well inside the far plane: on the handheld's depth buffer things near the far plane can fail the depth test and the sky flickers black.
 
 Do not pin the GPU clock by hand: setting `min_freq` of `/sys/class/devfreq/ff400000.gpu` to its top frequency made the GPU power domain fail (`failed to get ack on domain 'gpu'`) and the screen went black until a reboot. The default `simple_ondemand` governor already reaches 560 MHz under load.
 

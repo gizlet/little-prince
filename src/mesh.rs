@@ -19,6 +19,9 @@ pub struct Builder {
     uv: Vec<f32>,
     col: Vec<u8>,
     idx: Vec<u16>,
+    /// A coarser copy built alongside, for drawing far away: ellipsoids one
+    /// subdivision lower, cones and cylinders with half the sides.
+    pub lo: Option<Box<Builder>>,
 }
 
 pub type Sway<'a> = &'a dyn Fn(V3) -> f32;
@@ -155,7 +158,7 @@ pub fn upload_skinned(pos: &[f32], nrm: &[f32], uv: &[f32], ids: &[u8], w: &[f32
         m.colors = copy(ids);
         m.tangents = copy(w);
         m.indices = copy(idx);
-        ffi::UploadMesh(&mut m, false);
+        ffi::UploadMesh(&mut m, true);
         m
     }
 }
@@ -255,6 +258,9 @@ pub fn planet(subdiv: u32, height: &dyn Fn(V3) -> f32, colour: &dyn Fn(V3, f32) 
 
 /// An ellipsoid at `c` with the three semi-axes `axes` (as vectors).
 pub fn ellipsoid(b: &mut Builder, c: V3, axes: [V3; 3], subdiv: u32, col: &dyn Fn(V3) -> Color, sway: Sway, smooth: bool) {
+    if let Some(lo) = b.lo.as_deref_mut() {
+        ellipsoid(lo, c, axes, subdiv.saturating_sub(1), col, sway, smooth);
+    }
     let [ax, ay, az] = axes;
     let (sx, sy, sz) = (ax.len(), ay.len(), az.len());
     let map = |u: V3| c + ax * u.x + ay * u.y + az * u.z;
@@ -272,6 +278,9 @@ pub fn ellipsoid(b: &mut Builder, c: V3, axes: [V3; 3], subdiv: u32, col: &dyn F
 /// `r1`); a zero `r1` makes a cone. `cap` closes the ends.
 #[allow(clippy::too_many_arguments)]
 pub fn frustum(b: &mut Builder, base: V3, up: V3, sides: usize, seg: (f32, f32, f32, f32), col: Color, sway: Sway, cap: bool) {
+    if let Some(lo) = b.lo.as_deref_mut() {
+        frustum(lo, base, up, (sides / 2).max(3), seg, col, sway, cap);
+    }
     let up = up.norm();
     let x = any_perp(up);
     let z = up.cross(x);
@@ -308,6 +317,9 @@ pub fn frustum(b: &mut Builder, base: V3, up: V3, sides: usize, seg: (f32, f32, 
 
 /// A box at `c` with half-extents along the three `axes`.
 pub fn cuboid(b: &mut Builder, c: V3, axes: [V3; 3], col: Color) {
+    if let Some(lo) = b.lo.as_deref_mut() {
+        cuboid(lo, c, axes, col);
+    }
     for k in 0..3 {
         for s in [-1.0f32, 1.0] {
             let n = axes[k] * s;

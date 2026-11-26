@@ -116,9 +116,19 @@ pub struct Hero {
     model: Model,
     anims: *mut ModelAnimation,
     count: usize,
-    mesh: Mesh,
+    /// Two copies, written in turn, so a frame never rewrites the one the
+    /// GPU may still be drawing from the frame before.
+    meshes: [Mesh; 2],
+    buf: usize,
     tex: Texture2D,
     bind_inv: Vec<M>,
+    /// The bind pose and the skinning weights, and this frame's skinned vertices.
+    bind_pos: Vec<f32>,
+    bind_nrm: Vec<f32>,
+    bone_ids: Vec<u8>,
+    wts: Vec<f32>,
+    out_pos: Vec<f32>,
+    out_nrm: Vec<f32>,
     bones: usize,
     ids: Ids,
     cur: Track,
@@ -206,7 +216,8 @@ impl Hero {
             let (foot, top) = ys.fold((f32::MAX, f32::MIN), |(a, b), y| (a.min(y), b.max(y)));
             let tex = tex?;
             ffi::SetTextureFilter(tex, ffi::TextureFilter::TEXTURE_FILTER_BILINEAR as i32);
-            let mesh = crate::mesh::upload_skinned(&pos, &nrm, &uv, &ids, &w, &idx);
+            let meshes = [0, 1].map(|_| crate::mesh::upload_skinned(&pos, &nrm, &uv, &ids, &w, &idx));
+            let bone_ids = ids;
             let bind_inv = (0..bones).map(|i| srt_inv(&*model.skeleton.bindPose.add(i))).collect();
             let names: Vec<String> = (0..count as usize).map(|i| cname(&(*anims.add(i)).name)).collect();
             let find = |want: &[&str]| want.iter().find_map(|n| names.iter().position(|x| x == n)).unwrap_or(0);
@@ -224,9 +235,16 @@ impl Hero {
                 model,
                 anims,
                 count: count as usize,
-                mesh,
+                meshes,
+                buf: 0,
                 tex,
                 bind_inv,
+                out_pos: pos.clone(),
+                out_nrm: nrm.clone(),
+                bind_pos: pos,
+                bind_nrm: nrm,
+                bone_ids,
+                wts: w,
                 bones,
                 ids,
                 cur,
@@ -319,13 +337,51 @@ impl Hero {
                 self.palette[b * 4 + c] = [m[c * 4], m[c * 4 + 1], m[c * 4 + 2], m[c * 4 + 3]];
             }
         }
+        self.skin();
+    }
+
+    /// Skins the mesh on the CPU and uploads positions and normals. A few
+    /// thousand vertices take a fraction of a millisecond on a Cortex-A35,
+    /// where looking bones up in the vertex shader cost the Mali-G31 several.
+    fn skin(&mut self) {
+        if crate::prof::skip("skin") {
+            return;
+        }
+        let p = &self.palette;
+        for v in 0..self.bind_pos.len() / 3 {
+            let (x, y, z) = (self.bind_pos[v * 3], self.bind_pos[v * 3 + 1], self.bind_pos[v * 3 + 2]);
+            let (nx, ny, nz) = (self.bind_nrm[v * 3], self.bind_nrm[v * 3 + 1], self.bind_nrm[v * 3 + 2]);
+            let (mut o, mut n) = ([0.0f32; 3], [0.0f32; 3]);
+            for k in 0..4 {
+                let w = self.wts[v * 4 + k];
+                if w == 0.0 {
+                    continue;
+                }
+                let b = self.bone_ids[v * 4 + k] as usize * 4;
+                let (c0, c1, c2, c3) = (p[b], p[b + 1], p[b + 2], p[b + 3]);
+                for r in 0..3 {
+                    o[r] += w * (c0[r] * x + c1[r] * y + c2[r] * z + c3[r]);
+                    n[r] += w * (c0[r] * nx + c1[r] * ny + c2[r] * nz);
+                }
+            }
+            let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-6);
+            self.out_pos[v * 3..v * 3 + 3].copy_from_slice(&o);
+            self.out_nrm[v * 3..v * 3 + 3].copy_from_slice(&[n[0] / l, n[1] / l, n[2] / l]);
+        }
+        unsafe {
+            self.buf ^= 1;
+            let ids = std::slice::from_raw_parts(self.meshes[self.buf].vboId, 3);
+            let bytes = (self.out_pos.len() * 4) as i32;
+            ffi::rlUpdateVertexBuffer(ids[0], self.out_pos.as_ptr() as _, bytes, 0);
+            ffi::rlUpdateVertexBuffer(ids[2], self.out_nrm.as_ptr() as _, bytes, 0);
+        }
     }
 
     /// Draws the hero standing at `f` (unit axes: right, up, forward), `h` tall.
     pub fn draw(&self, gl: &Gl, f: &Frame, h: f32) {
         let k = h / self.height.max(1e-3);
         let m: Matrix = basis(f.x * k, f.y * k, f.z * k, f.o - f.y * (self.foot * k));
-        gl.draw_skinned(self.mesh, m, self.tex, &self.palette);
+        gl.draw_skinned(self.meshes[self.buf], m, self.tex);
     }
 
     /// The top of the head, for the birds' strings.

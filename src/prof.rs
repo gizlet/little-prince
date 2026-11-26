@@ -9,6 +9,8 @@ use std::cell::RefCell;
 struct Prof {
     on: bool,
     split: bool,
+    /// Wait for the GPU at each mark (`1`); `3` times the CPU side only.
+    wait: bool,
     last: f64,
     stages: Vec<(&'static str, f64)>,
     frames: u32,
@@ -21,11 +23,12 @@ thread_local! {
     static P: RefCell<Prof> = RefCell::new(Prof::default());
 }
 
-pub fn enable(split: bool) {
+pub fn enable(split: bool, wait: bool) {
     P.with(|p| {
         let mut p = p.borrow_mut();
         p.on = true;
         p.split = split;
+        p.wait = wait;
         #[cfg(unix)]
         unsafe {
             let f = libc::dlsym(libc::RTLD_DEFAULT, c"glFinish".as_ptr());
@@ -64,6 +67,20 @@ pub fn skip(part: &str) -> bool {
     S.with(|s| s.iter().any(|x| x == part))
 }
 
+/// Adds `dt` seconds to stage `name` without waiting for the GPU.
+pub fn add(name: &'static str, dt: f64) {
+    P.with(|p| {
+        let mut p = p.borrow_mut();
+        if !p.on {
+            return;
+        }
+        match p.stages.iter_mut().find(|s| s.0 == name) {
+            Some(s) => s.1 += dt,
+            None => p.stages.push((name, dt)),
+        }
+    });
+}
+
 /// Ends the stage `name` here.
 pub fn mark(name: &'static str) {
     P.with(|p| {
@@ -71,10 +88,12 @@ pub fn mark(name: &'static str) {
         if !p.on || !p.split {
             return;
         }
-        unsafe {
-            ffi::rlDrawRenderBatchActive();
-            if let Some(f) = p.finish {
-                f();
+        if p.wait {
+            unsafe {
+                ffi::rlDrawRenderBatchActive();
+                if let Some(f) = p.finish {
+                    f();
+                }
             }
         }
         let now = unsafe { ffi::GetTime() };

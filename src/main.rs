@@ -59,6 +59,18 @@ fn view() -> (Rectangle, f32) {
     (Rectangle { x: ((sw - w) / 2.0).floor(), y: ((sh - h) / 2.0).floor(), width: w, height: h }, k)
 }
 
+/// Seconds of CPU time the calling thread has used.
+fn thread_cpu() -> f64 {
+    #[cfg(unix)]
+    unsafe {
+        let mut ts: libc::timespec = std::mem::zeroed();
+        libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut ts);
+        ts.tv_sec as f64 + ts.tv_nsec as f64 * 1e-9
+    }
+    #[cfg(not(unix))]
+    0.0
+}
+
 fn main() {
     if std::env::args().nth(1).as_deref() == Some("--version") {
         println!("littleprince {}", env!("CARGO_PKG_VERSION"));
@@ -77,9 +89,19 @@ fn main() {
         ffi::SetTraceLogLevel(if KMS { ffi::TraceLogLevel::LOG_INFO } else { ffi::TraceLogLevel::LOG_WARNING } as i32);
         ffi::SetConfigFlags(flags);
         ffi::InitWindow(w, h, c"The Little Prince · 小王子".as_ptr());
-        if !ffi::IsWindowReady() {
-            eprintln!("littleprince: the display could not be opened");
+        // raylib reports the window ready even when the DRM platform failed
+        // (another program holding the display); then no GL context exists.
+        if !ffi::IsWindowReady() || ffi::rlGetShaderIdDefault() == 0 {
+            eprintln!("littleprince: the display could not be opened (is another program using it?)");
             std::process::exit(1);
+        }
+        // raylib's one batch buffer is rewritten at every flush; on Panfrost
+        // rewriting a buffer the frame still uses stalls the CPU for
+        // milliseconds. Many buffers in rotation keep each flush on a fresh one.
+        let buffers = std::env::var("LITTLEPRINCE_BATCH").ok().and_then(|v| v.parse().ok()).unwrap_or(48);
+        if buffers > 1 {
+            let batch = Box::leak(Box::new(ffi::rlLoadRenderBatch(buffers, 1024)));
+            ffi::rlSetRenderBatchActive(batch);
         }
         ffi::SetExitKey(0);
         ffi::SetTargetFPS(60);
@@ -108,10 +130,12 @@ fn main() {
     }
 
     if let Ok(v) = std::env::var("LITTLEPRINCE_PROFILE") {
-        prof::enable(v != "2");
+        prof::enable(v != "2", v == "1");
     }
     let start = unsafe { ffi::GetTime() };
     while !unsafe { ffi::WindowShouldClose() } && !app.quit {
+        let t0 = unsafe { ffi::GetTime() };
+        let c0 = thread_cpu();
         let dt = if capture.is_some() { 1.0 / 60.0 } else { unsafe { ffi::GetFrameTime() }.min(0.1) };
         let now = unsafe { ffi::GetTime() } - start;
         controls.poll(dt, now);
@@ -119,16 +143,24 @@ fn main() {
             app.update(dt, &controls);
         }
         prof::mark("update");
-        app.render();
         let (dest, k) = view();
+        let direct = app.gl.direct(app.fx_level);
+        if !direct {
+            app.render(false);
+        }
         if app.hud {
             hud::prepare(&app, k);
         }
+        prof::mark("hud-prepare");
         unsafe {
             ffi::BeginDrawing();
             ffi::ClearBackground(gl::rgb(0x000000));
         }
-        app.present(dest);
+        if direct {
+            app.render(true);
+        } else {
+            app.present(dest);
+        }
         prof::mark("post");
         unsafe {
             ffi::BeginMode2D(Camera2D { offset: Vector2 { x: dest.x, y: dest.y }, target: Vector2 { x: 0.0, y: 0.0 }, rotation: 0.0, zoom: k });
@@ -150,8 +182,11 @@ fn main() {
             }
             break;
         }
+        prof::add("cpu", unsafe { ffi::GetTime() } - t0);
         unsafe { ffi::EndDrawing() };
         prof::mark("swap");
+        // CPU time this thread actually ran: the rest of the frame it waited.
+        prof::add("thread-cpu", thread_cpu() - c0);
         if prof::on() {
             prof::frame(&format!("{:?} fx{} parts{} tris{}k", app.world().kind, app.fx_level, app.fx.count(), app.gl.tris.take() / 1000));
         }

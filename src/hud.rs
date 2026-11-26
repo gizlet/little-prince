@@ -43,6 +43,9 @@ thread_local! {
 /// Refreshes the cached layer; call outside any drawing mode, `k` being the
 /// canvas zoom.
 pub fn prepare(app: &App, k: f32) {
+    if crate::prof::skip("hudcache") {
+        return;
+    }
     let (w, h) = ((640.0 * k).round() as i32, (480.0 * k).round() as i32);
     let key = (app.fx_level, app.show_stats, app.lang == Lang::Zh, app.mode == Mode::Title);
     CACHE.with(|c| {
@@ -84,16 +87,20 @@ fn blit_cache() {
     CACHE.with(|c| {
         if let Some(c) = c.borrow().as_ref() {
             let t = c.rt.texture;
+            // Only the parts that hold something, not the whole screen: blending
+            // a full-screen quad costs the handheld's GPU several milliseconds.
+            let k = t.width as f32 / 640.0;
+            let mut parts = vec![(0.0f32, 426.0f32, 640.0f32, 54.0f32)];
+            if c.key.1 {
+                parts.push((4.0, 4.0, 230.0, 108.0));
+            }
             unsafe {
                 ffi::BeginBlendMode(ffi::BlendMode::BLEND_ALPHA_PREMULTIPLY as i32);
-                ffi::DrawTexturePro(
-                    t,
-                    Rectangle { x: 0.0, y: 0.0, width: t.width as f32, height: -(t.height as f32) },
-                    Rectangle { x: 0.0, y: 0.0, width: 640.0, height: 480.0 },
-                    Vector2 { x: 0.0, y: 0.0 },
-                    0.0,
-                    rgb(0xFFFFFF),
-                );
+                for (x, y, w, h) in parts {
+                    // The texture is upside down: rows are counted from the bottom.
+                    let src = Rectangle { x: x * k, y: (480.0 - y - h) * k, width: w * k, height: -h * k };
+                    ffi::DrawTexturePro(t, src, Rectangle { x, y, width: w, height: h }, Vector2 { x: 0.0, y: 0.0 }, 0.0, rgb(0xFFFFFF));
+                }
                 ffi::EndBlendMode();
             }
         }
@@ -101,11 +108,16 @@ fn blit_cache() {
 }
 
 pub fn draw(app: &App) {
-    match app.mode {
-        Mode::Title => title(app),
-        _ => play(app),
+    if !crate::prof::skip("hudlive") {
+        match app.mode {
+            Mode::Title => title(app),
+            _ => play(app),
+        }
     }
-    blit_cache();
+    crate::prof::mark("hud-live");
+    if !crate::prof::skip("hudcache") {
+        blit_cache();
+    }
     if app.quit_hold > 0.15 {
         let f = &app.fonts;
         let k = clamp01(app.quit_hold / 2.0);

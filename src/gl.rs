@@ -253,12 +253,13 @@ void main() {
     float lit = smoothstep(-0.02, 0.07, dot(n, sunDir));
     float day = smoothstep(-0.28, 0.18, dot(up, sunDir));
     vec3 col = base * (mix(shadeCol, sunCol * 0.9, lit * day) + skyCol * (0.06 + 0.1 * (dot(n, up) * 0.5 + 0.5)));
-    vec3 l = lampPos - w;
-    float ld = length(l);
-    float lamp = max(0.0, 1.0 - ld / 2.3);
-    col += base * lampCol * lamp * lamp * (0.35 + 0.65 * max(dot(n, l / max(ld, 0.001)), 0.0));
-    float rim = 1.0 - max(dot(n, normalize(camPos - w)), 0.0);
-    col += rimCol * smoothstep(0.62, 0.74, rim) * lit * day * 0.22;
+    // Scenery has no rim light, and lamp light only while the lamp burns.
+    if (lampCol.r > 0.0) {
+        vec3 l = lampPos - w;
+        float ld = length(l);
+        float lamp = max(0.0, 1.0 - ld / 2.3);
+        col += base * lampCol * lamp * lamp * (0.35 + 0.65 * max(dot(n, l / max(ld, 0.001)), 0.0));
+    }
     col += base * emissive;
     float f = clamp((length(camPos - w) - fogRange.x) / (fogRange.y - fogRange.x), 0.0, 1.0);
     vC = vec4(mix(col, fogCol, f * f * 0.85), colDiffuse.a * vertexColor.a);
@@ -373,38 +374,21 @@ pub struct Rig {
     pub per_tris: i32,
 }
 
-/// GPU skinning for the hero (see `hero.rs`): four bones per vertex, the
-/// bone indices in the colour attribute and the weights in the tangent one.
-const SKIN_HEAD: &str = r#"
+/// The hero, skinned on the CPU (see `hero.rs`): textured, lit per pixel.
+const SKIN_VS: &str = r#"
 attribute vec3 vertexPosition;
 attribute vec3 vertexNormal;
 attribute vec2 vertexTexCoord;
-attribute vec4 vertexColor;
-attribute vec4 vertexTangent;
 uniform mat4 mvp;
 uniform mat4 matModel;
-uniform vec4 bones[256];
-mat4 bone(float f) {
-    int i = int(f * 255.0 + 0.5) * 4;
-    return mat4(bones[i], bones[i + 1], bones[i + 2], bones[i + 3]);
-}
-mat4 skin() {
-    vec4 w = vertexTangent;
-    return bone(vertexColor.x) * w.x + bone(vertexColor.y) * w.y + bone(vertexColor.z) * w.z + bone(vertexColor.w) * w.w;
-}
-"#;
-
-const SKIN_VS: &str = r#"
 varying vec3 vN;
 varying vec3 vW;
 varying vec2 vUV;
 void main() {
-    mat4 s = skin();
-    vec4 p = s * vec4(vertexPosition, 1.0);
-    vW = (matModel * p).xyz;
-    vN = (matModel * (s * vec4(vertexNormal, 0.0))).xyz;
+    vW = (matModel * vec4(vertexPosition, 1.0)).xyz;
+    vN = (matModel * vec4(vertexNormal, 0.0)).xyz;
     vUV = vertexTexCoord;
-    gl_Position = mvp * p;
+    gl_Position = mvp * vec4(vertexPosition, 1.0);
 }
 "#;
 
@@ -442,21 +426,6 @@ void main() {
 }
 "#;
 
-const SKIN_OUTLINE_VS: &str = r#"
-uniform float width;
-void main() {
-    mat4 s = skin();
-    vec4 p = s * vec4(vertexPosition, 1.0);
-    vec3 n = normalize((s * vec4(vertexNormal, 0.0)).xyz);
-    vec4 c = mvp * p;
-    vec4 c2 = mvp * vec4(p.xyz + n * 0.05, 1.0);
-    vec2 d = c2.xy / c2.w - c.xy / c.w;
-    float l = length(d);
-    d = l > 0.000001 ? d / l : vec2(0.0);
-    c.xy += d * width * vec2(2.0 / 640.0, 2.0 / 480.0) * c.w;
-    gl_Position = c;
-}
-"#;
 
 const OUTLINE_VS: &str = r#"
 attribute vec3 vertexPosition;
@@ -614,8 +583,6 @@ pub struct Gl {
     pub lit: Uniforms,
     skin: Uniforms,
     skin_mat: Material,
-    skin_outline: Uniforms,
-    skin_outline_mat: Material,
     rig_u: Uniforms,
     rig_mat: Material,
     rig_outline: Uniforms,
@@ -638,6 +605,8 @@ pub struct Gl {
     pub ink: Cell<Color>,
     pub ink_px: Cell<f32>,
     pub outlines: Cell<bool>,
+    /// The hero's outline costs several milliseconds on the handheld: high effects only.
+    pub hero_ink: Cell<bool>,
     /// Triangles submitted since last read, for the profiler.
     pub tris: Cell<u64>,
 }
@@ -727,16 +696,13 @@ impl Gl {
         let lit = load(Some(LIT_VS), LIT_FS);
         let outline = load(Some(OUTLINE_VS), OUTLINE_FS);
         let litv = load(Some(LITV_VS), LITV_FS);
-        let skin = load(Some(&format!("{SKIN_HEAD}{SKIN_VS}")), SKIN_FS);
-        let skin_outline = load(Some(&format!("{SKIN_HEAD}{SKIN_OUTLINE_VS}")), OUTLINE_FS);
+        let skin = load(Some(SKIN_VS), SKIN_FS);
         let rig = load(Some(&format!("{RIG_HEAD}{RIG_VS}")), RIG_FS);
         let rig_outline = load(Some(&format!("{RIG_HEAD}{RIG_OUTLINE_VS}")), OUTLINE_FS);
         Gl {
             lit: Uniforms::new(lit),
             skin: Uniforms::new(skin),
             skin_mat: material(skin),
-            skin_outline: Uniforms::new(skin_outline),
-            skin_outline_mat: material(skin_outline),
             rig_u: Uniforms::new(rig),
             rig_mat: material(rig),
             rig_outline: Uniforms::new(rig_outline),
@@ -759,6 +725,7 @@ impl Gl {
             ink: Cell::new(rgb(0x3A2B33)),
             ink_px: Cell::new(1.4),
             outlines: Cell::new(true),
+            hero_ink: Cell::new(true),
             tris: Cell::new(0),
         }
     }
@@ -829,27 +796,29 @@ impl Gl {
         }
     }
 
-    /// Draws a GPU-skinned mesh (see `hero.rs`) with `palette` holding four
-    /// columns per bone, then its ink outline.
-    pub fn draw_skinned(&self, mesh: Mesh, m: Matrix, tex: Texture2D, palette: &[[f32; 4]]) {
-        let n = palette.len().min(256) as i32;
-        let vec4 = ffi::ShaderUniformDataType::SHADER_UNIFORM_VEC4 as i32;
+    /// Draws the hero's mesh (already skinned on the CPU), then its ink outline.
+    pub fn draw_skinned(&self, mesh: Mesh, m: Matrix, tex: Texture2D) {
         self.tris.set(self.tris.get() + mesh.triangleCount as u64);
         unsafe {
-            ffi::SetShaderValueV(self.skin.shader, self.skin.loc("bones"), palette.as_ptr() as _, vec4, n);
             (*self.skin_mat.maps).texture = tex;
             (*self.skin_mat.maps).color = rgb(0xFFFFFF);
             ffi::DrawMesh(mesh, self.skin_mat, m);
-            if self.outlines.get() && !crate::prof::skip("heroink") {
-                ffi::SetShaderValueV(self.skin_outline.shader, self.skin_outline.loc("bones"), palette.as_ptr() as _, vec4, n);
-                (*self.skin_outline_mat.maps).color = self.ink.get();
-                self.skin_outline.f("width", self.ink_px.get());
+            if self.outlines.get() && self.hero_ink.get() && !crate::prof::skip("heroink") {
+                (*self.outline_mat.maps).color = self.ink.get();
+                self.outline.f("width", self.ink_px.get());
+                self.outline.f("radial", 0.0);
                 ffi::rlSetCullFace(ffi::rlCullMode::RL_CULL_FACE_FRONT as i32);
-                ffi::DrawMesh(mesh, self.skin_outline_mat, m);
+                ffi::DrawMesh(mesh, self.outline_mat, m);
                 ffi::rlSetCullFace(ffi::rlCullMode::RL_CULL_FACE_BACK as i32);
                 self.tris.set(self.tris.get() + mesh.triangleCount as u64);
             }
         }
+    }
+
+    /// Whether the 3D scene can be drawn straight to a 640×480 screen,
+    /// skipping the scene texture and the full-screen copy out of it.
+    pub fn direct(&self, level: u8) -> bool {
+        level < 2 && self.scene.texture.width == W && unsafe { ffi::GetRenderWidth() == W && ffi::GetRenderHeight() == H }
     }
 
     /// Registers the batched unit shapes (see `Kit`).

@@ -30,6 +30,8 @@ pub enum Kind {
 
 pub const KINDS: [Kind; 3] = [Kind::B612, Kind::Lamp, Kind::Desert];
 const FOX_TRUST: usize = 5;
+/// How far the stars, sun and moon are drawn from the camera.
+pub const SKY_D: f32 = 26.0;
 
 /// The sky and light where the prince stands.
 #[derive(Clone, Copy)]
@@ -366,6 +368,7 @@ pub struct World {
     pub spawn: V3,
     ground: Vec<Chunk>,
     props: Vec<Chunk>,
+    props_lo: Vec<Chunk>,
     decor: Vec<Chunk>,
     grass: Vec<Chunk>,
     clouds: Vec<(V3, V3, f32, f32)>,
@@ -454,6 +457,7 @@ impl World {
             spawn,
             ground,
             props: Vec::new(),
+            props_lo: Vec::new(),
             decor: Vec::new(),
             grass: Vec::new(),
             clouds: Vec::new(),
@@ -475,6 +479,7 @@ impl World {
             pop: 0.0,
         };
         let mut props = Builder::default();
+        props.lo = Some(Box::default());
         let mut decor = Builder::default();
         let mut taken = vec![spawn];
         match kind {
@@ -567,7 +572,7 @@ impl World {
                 }
                 let bare = taken.clone();
                 let keep = move |d: V3| path_dist(d) > 0.28 && bare.iter().all(|t| t.dot(d) < 0.99985);
-                w.grass = mesh::grass(&mut rng, 20000, r, &keep, (0.08, 0.2), &[
+                w.grass = mesh::grass(&mut rng, 15000, r, &keep, (0.09, 0.21), &[
                     rgb(0x5A8C3A),
                     rgb(0x6C9C42),
                     rgb(0x7FAD4C),
@@ -671,7 +676,9 @@ impl World {
                 w.total = FOX_TRUST;
             }
         }
+        let lo = props.lo.take().map(|b| *b).unwrap_or_default();
         w.props = props.chunked(true);
+        w.props_lo = lo.chunked(true);
         w.decor = decor.chunked(true);
         w
     }
@@ -1000,25 +1007,28 @@ impl World {
     /// Stars, the sun and the moon, behind everything (additive). `warp`
     /// stretches the stars into streaks.
     pub fn draw_sky(&self, gl: &Gl, s: &Sprites, cam: V3, t: f32, warp: f32, sky: &Sky) {
+        // The sky sits 26 units away, in front of the backdrop at 30: on a
+        // 16-bit depth buffer anything much farther rounds to the far plane.
+        let k = SKY_D / 70.0;
         let stars = sky.stars.max(warp);
         Sprites::begin(gl.sprite);
         if stars > 0.01 {
             for st in &self.stars {
-                let p = cam + st.d * 70.0;
+                let p = cam + st.d * (70.0 * k);
                 let tw = 0.55 + 0.45 * (t * (1.5 + st.size) + st.phase).sin();
                 let c = rgba(st.col, (stars * tw).min(1.0));
                 if warp > 0.02 {
-                    s.streak(p, st.d, st.size * (1.0 + warp * 20.0), st.size * 0.5, c);
+                    s.streak(p, st.d, st.size * k * (1.0 + warp * 20.0), st.size * k * 0.5, c);
                 } else {
-                    s.billboard(p, st.size, c);
+                    s.billboard(p, st.size * k, c);
                     if st.size > 0.6 {
-                        s.billboard(p, st.size * 2.6, rgba(st.col, stars * tw * 0.25));
+                        s.billboard(p, st.size * k * 2.6, rgba(st.col, stars * tw * 0.25));
                     }
                 }
             }
             for sh in &self.shooting {
                 let a = (sh.life / 0.9).min(1.0) * stars;
-                s.streak(cam + sh.p.norm() * 70.0, sh.v, 3.5, 0.16, rgba(rgb(0xFFFFFF), a));
+                s.streak(cam + sh.p.norm() * (70.0 * k), sh.v, 3.5 * k, 0.16 * k, rgba(rgb(0xFFFFFF), a));
             }
         }
         // Cloud banks: soft overlapping puffs, brighter in daylight.
@@ -1036,14 +1046,14 @@ impl World {
                 }
             }
         }
-        let sun = cam + sky.sun * 65.0;
+        let sun = cam + sky.sun * (65.0 * k);
         let pulse = 1.0 + 0.03 * (t * 1.5).sin();
-        s.billboard(sun, 20.0 * pulse, rgba(sky.sun_col, 0.3));
-        s.billboard(sun, 6.5, rgba(sky.sun_col, 0.6));
-        s.billboard(sun, 3.0, rgba(lighten(sky.sun_col, 0.7), 1.0));
-        let moon = cam - sky.sun.rotate(v3(0.0, 0.0, 1.0), 0.5) * 65.0;
-        s.billboard(moon, 9.0, rgba(rgb(0xBFD0FF), 0.25 * sky.night));
-        s.billboard(moon, 2.4, rgba(rgb(0xF4F1E0), sky.night));
+        s.billboard(sun, 20.0 * k * pulse, rgba(sky.sun_col, 0.3));
+        s.billboard(sun, 6.5 * k, rgba(sky.sun_col, 0.6));
+        s.billboard(sun, 3.0 * k, rgba(lighten(sky.sun_col, 0.7), 1.0));
+        let moon = cam - sky.sun.rotate(v3(0.0, 0.0, 1.0), 0.5) * (65.0 * k);
+        s.billboard(moon, 9.0 * k, rgba(rgb(0xBFD0FF), 0.25 * sky.night));
+        s.billboard(moon, 2.4 * k, rgba(rgb(0xF4F1E0), sky.night));
         Sprites::end();
     }
 
@@ -1071,10 +1081,16 @@ impl World {
             crate::prof::tris("ground", c.mesh.triangleCount as u64);
             gl.surface(c.mesh, Ink::None);
         }
-        for c in self.props.iter().filter(|c| !crate::prof::skip("props") && self.visible(c, cam, fwd, 4.0, 16.0)) {
-            // Scenery has no ink outline: on the handheld it would double the
-            // geometry. The hero and the small characters keep theirs.
+        // Near chunks in full detail, far ones from the coarser copy. Both
+        // are split on the same cell directions, so each cell draws once.
+        let near = |c: &Chunk| (c.dir * self.radius - cam).len() < 6.0;
+        let far_ok = !crate::prof::skip("props");
+        for c in self.props.iter().filter(|c| far_ok && near(c) && self.visible(c, cam, fwd, 4.0, 16.0)) {
             crate::prof::tris("props", c.mesh.triangleCount as u64);
+            gl.surface(c.mesh, Ink::None);
+        }
+        for c in self.props_lo.iter().filter(|c| far_ok && !near(c) && self.visible(c, cam, fwd, 4.0, 16.0)) {
+            crate::prof::tris("props-lo", c.mesh.triangleCount as u64);
             gl.surface(c.mesh, Ink::None);
         }
         for c in self.decor.iter().filter(|c| !crate::prof::skip("flowers") && self.visible(c, cam, fwd, 0.3, 7.0)) {
@@ -1205,7 +1221,7 @@ impl World {
     }
 
     pub fn draw_grass(&self, gl: &Gl, cam: V3, fwd: V3) {
-        for c in self.grass.iter().filter(|c| !crate::prof::skip("grass") && self.visible(c, cam, fwd, 0.3, 6.5)) {
+        for c in self.grass.iter().filter(|c| !crate::prof::skip("grass") && self.visible(c, cam, fwd, 0.3, 5.5)) {
             crate::prof::tris("grass", c.mesh.triangleCount as u64);
             gl.draw_swaying(c.mesh, 1.0, true);
         }

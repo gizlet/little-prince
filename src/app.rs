@@ -496,8 +496,9 @@ impl App {
         }
     }
 
-    /// Draws the 3D scene into the 640×480 target.
-    pub fn render(&self) {
+    /// Draws the 3D scene: into the 640×480 target, or, when `direct`,
+    /// straight to the screen inside `BeginDrawing`.
+    pub fn render(&self, direct: bool) {
         let w = self.world();
         let warp = self.warp_amount();
         let t = self.t;
@@ -538,17 +539,27 @@ impl App {
         let bottom = mix(sky.bottom, rgb(0x1A1640), warp);
         let g = &self.gl;
         g.ink.set(sky.ink);
+        g.hero_ink.set(self.fx_level >= 2);
         g.outlines.set(!std::env::var("LITTLEPRINCE_NOINK").is_ok_and(|v| v == "1"));
         unsafe {
-            ffi::BeginTextureMode(g.scene);
-            ffi::ClearBackground(bottom);
-            ffi::DrawRectangleGradientV(0, 0, g.scene.texture.width, g.scene.texture.height, top, bottom);
+            if !direct {
+                ffi::BeginTextureMode(g.scene);
+                ffi::ClearBackground(bottom);
+            }
             ffi::BeginMode3D(camera);
         }
         g.light(&light, t);
         crate::prof::mark("setup");
-        gl::additive(|| w.draw_sky(g, &spr, self.cam.pos, t, warp, &sky));
-        crate::prof::mark("sky");
+        // Opaque things first, with blending off so the GPU can drop hidden
+        // fragments early (Mali's forward pixel kill and early depth test
+        // skip blended draws), nearest first: the hero, then the world.
+        let opaque = !crate::prof::skip("blend");
+        if opaque {
+            unsafe {
+                ffi::rlDrawRenderBatchActive();
+                ffi::rlDisableColorBlend();
+            }
+        }
         w.draw(g, &self.kit, t, self.cam.pos, fwd);
         crate::prof::mark("world-queue");
         match &self.hero {
@@ -562,6 +573,20 @@ impl App {
         crate::prof::mark("solids");
         w.draw_grass(g, self.cam.pos, fwd);
         crate::prof::mark("grass");
+        // The sky gradient last, on a quad at the far end of the view: only the
+        // pixels the planet leaves uncovered are filled, not the whole screen.
+        draw_backdrop(self.cam.pos + shake, fwd, right, up, 50.0 + warp * 14.0, top, bottom);
+        if opaque {
+            unsafe {
+                ffi::rlDrawRenderBatchActive();
+                ffi::rlEnableColorBlend();
+            }
+        }
+        crate::prof::mark("backdrop");
+        // Stars, sun, moon and clouds after the solids, so the depth test
+        // rejects whatever the planet hides.
+        gl::additive(|| w.draw_sky(g, &spr, self.cam.pos, t, warp, &sky));
+        crate::prof::mark("sky");
         if self.hero.is_none() {
             self.player.draw_scarf(&light, t, sky.ink);
         }
@@ -584,7 +609,13 @@ impl App {
         });
         unsafe {
             ffi::EndMode3D();
-            ffi::EndTextureMode();
+            if direct {
+                if self.fx.flash > 0.01 {
+                    ffi::DrawRectangle(0, 0, gl::W, gl::H, rgba(rgb(0xFFFFFF), self.fx.flash));
+                }
+            } else {
+                ffi::EndTextureMode();
+            }
         }
         crate::prof::mark("glow");
     }
@@ -601,6 +632,29 @@ impl App {
             flash: self.fx.flash,
         };
         self.gl.present(&post, dest);
+    }
+}
+
+/// A camera-facing quad just inside the far plane, `top` colour at the top
+/// of the screen fading to `bottom`.
+fn draw_backdrop(cam: V3, fwd: V3, right: V3, up: V3, fovy: f32, top: Color, bottom: Color) {
+    // Well inside the far plane: on a 16-bit depth buffer a backdrop near
+    // it rounds to the cleared depth, fails the test and flickers black.
+    let d = crate::world::SKY_D + 4.0;
+    let h = d * (fovy.to_radians() * 0.5).tan() * 1.1;
+    let w = h * (gl::W as f32 / gl::H as f32) * 1.1;
+    let c = cam + fwd * d;
+    unsafe {
+        ffi::rlDisableBackfaceCulling();
+        ffi::rlSetTexture(0);
+        ffi::rlBegin(ffi::RL_QUADS as i32);
+        for (p, col) in [(c - right * w + up * h, top), (c - right * w - up * h, bottom), (c + right * w - up * h, bottom), (c + right * w + up * h, top)] {
+            ffi::rlColor4ub(col.r, col.g, col.b, 255);
+            ffi::rlVertex3f(p.x, p.y, p.z);
+        }
+        ffi::rlEnd();
+        ffi::rlDrawRenderBatchActive();
+        ffi::rlEnableBackfaceCulling();
     }
 }
 
