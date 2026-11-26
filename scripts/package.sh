@@ -1,9 +1,8 @@
 #!/bin/sh
 # scripts/package.sh [OUT]: builds The Little Prince for aarch64 Gizlet OS and
-# assembles the app folder that `gizlet install` takes (dist/littleprince by
-# default).
+# assembles the app folder (dist/littleprince by default) and its .gzl.
 #
-# Needs zig, the Rust target aarch64-unknown-linux-gnu and Gizlet runtime 1's
+# Needs Python 3.11+, zig, the Rust target aarch64-unknown-linux-gnu and Gizlet runtime 1's
 # libraylib.so: set GIZLET_RAYLIB_LIB to the folder holding it. gizlet/os
 # builds it with `bazel build --config=r36s //runtime:raylib`.
 set -eu
@@ -28,8 +27,6 @@ cargo build --release --locked --target "$target" --features gizlet-os
 rm -rf "$out"
 mkdir -p "$out/bin" "$out/licenses"
 cp "target/$target/release/littleprince" "$out/bin/littleprince"
-cp gizlet.toml "$out/gizlet.toml"
-cp assets/icon.png "$out/icon.png"
 cp LICENSE "$out/licenses/littleprince-MIT.txt"
 mkdir -p "$out/assets/hero"
 cp assets/hero/Rogue_Hooded.glb "$out/assets/hero/"
@@ -37,4 +34,4 @@ cp assets/hero/KayKit-LICENSE.txt "$out/licenses/kaykit-adventurers-CC0.txt"
 cp assets/fonts/Inter-OFL.txt "$out/licenses/inter-OFL.txt"
 cp assets/fonts/SpaceGrotesk-OFL.txt "$out/licenses/space-grotesk-OFL.txt"
 cp assets/fonts/DroidSansFallback-LICENSE.txt "$out/licenses/droid-sans-fallback-Apache-2.0.txt"
-echo "$out"
+python3 scripts/pack.py "$out" "$target"

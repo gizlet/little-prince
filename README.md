@@ -71,17 +71,17 @@ cargo test
 
 ## Run on Gizlet OS
 
-On the device the game links Gizlet runtime 1's `libraylib.so.600`, built for DRM with OpenGL ES 3.0 (ES 2 runtimes work too; the shaders follow the context raylib makes), and reads the handheld's buttons from evdev. `scripts/package.sh` cross-builds it from a Mac with zig as the linker and assembles the app folder.
+On the device the game links Gizlet runtime 1's `libraylib.so.600`, built for DRM with OpenGL ES 3.0 (ES 2 runtimes work too; the shaders follow the context raylib makes), and reads the handheld's buttons from evdev. `scripts/package.sh` builds the application and writes its `.gzl` package.
 
-Requirements: [zig](https://ziglang.org), `rustup target add aarch64-unknown-linux-gnu`, and runtime 1's `libraylib.so`, built in [gizlet/os](https://github.com/gizlet/os) with `bazel build --config=r36s //runtime:raylib`.
+Install Python 3.11 or newer, [zig](https://ziglang.org), and the Rust `aarch64-unknown-linux-gnu` target. Build runtime 1's `libraylib.so` in [gizlet/os](https://github.com/gizlet/os) with `bazel build --config=r36s //runtime:raylib`.
 
 ```sh
-GIZLET_RAYLIB_LIB=/path/to/folder/with/libraylib.so scripts/package.sh   # dist/littleprince/
-scp -r dist/littleprince root@DEVICE:/opt/gizlet/apps/io.gizlet.littleprince/0.2.0
-ssh root@DEVICE 'cd /opt/gizlet/apps/io.gizlet.littleprince/0.2.0 && /opt/gizlet/runtime/1/bin/gizlet-run bin/littleprince'
+GIZLET_RAYLIB_LIB=/path/to/folder/with/libraylib.so scripts/package.sh
+scp dist/io.gizlet.littleprince-0.2.0-aarch64-unknown-linux-gnu-lite.gzl root@DEVICE:/tmp/
+ssh root@DEVICE 'gizlet install /tmp/io.gizlet.littleprince-0.2.0-aarch64-unknown-linux-gnu-lite.gzl'
 ```
 
-Stop the launcher first (`systemctl stop gizlet-session`) so the game gets the screen.
+Open the game from the launcher. To publish a release, match the versions in `Cargo.toml` and `gizlet.toml`, then push `v<version>`. CI runs the tests, builds the `.gzl`, publishes the GitHub Release, and waits for the Gizlet Store checks.
 
 ### Performance on the R36S
 
@@ -117,7 +117,7 @@ Do not pin the GPU clock by hand: setting `min_freq` of `/sys/class/devfreq/ff40
 | `src/stats.rs` | CPU, memory, temperature and clock readings |
 | `src/prof.rs` | The frame profiler |
 | `src/input.rs`, `src/evdev.rs` | Keyboard, gamepads and the handheld's evdev devices (from [gizlet/overeaten](https://github.com/gizlet/overeaten)) |
-| `scripts/package.sh`, `scripts/zig-cc` | The device build and app folder |
+| `scripts/package.sh`, `scripts/pack.py`, `scripts/zig-cc` | The device build and `.gzl` packaging |
 | `assets/` | The hero model, fonts and the icon |
 
 ## License
