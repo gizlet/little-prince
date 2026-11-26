@@ -351,22 +351,31 @@ impl App {
         self.update_camera(dt);
     }
 
+    /// How high the birds carry the prince: high enough to see the planet
+    /// round below.
+    fn flight_height(&self) -> f32 {
+        (self.world().radius * 0.75).max(13.0)
+    }
+
     fn update_flight(&mut self) {
         let ft = self.mode_t;
         if ft < LEAVE {
             let u = ft / LEAVE;
-            self.player.alt = 0.4 * u + 13.0 * u * u * u;
-            self.player.alt_v = (0.4 + 39.0 * u * u) / LEAVE;
+            let h = self.flight_height();
+            self.player.alt = 0.4 * u + h * u * u * u;
+            self.player.alt_v = (0.4 + 3.0 * h * u * u) / LEAVE;
             self.player.grounded = false;
         } else if !self.switched {
             self.switched = true;
-            self.arrive_at(self.fly_to, 13.0);
+            let h = (self.worlds[self.fly_to].radius * 0.75).max(13.0);
+            self.arrive_at(self.fly_to, h);
             self.player.reach_target = 1.0;
         } else {
             let u = ((ft - LEAVE) / ARRIVE).min(1.0);
             let k = 1.0 - u;
-            self.player.alt = 13.0 * k * k * k;
-            self.player.alt_v = -39.0 * k * k / ARRIVE;
+            let h = self.flight_height();
+            self.player.alt = h * k * k * k;
+            self.player.alt_v = -3.0 * h * k * k / ARRIVE;
             self.player.grounded = false;
             if u >= 1.0 {
                 self.player.land(3.5);
@@ -571,11 +580,16 @@ impl App {
         };
         let spr = Sprites { right, up, fwd };
         let (lamp, lamp_on) = w.lamp_light().unwrap_or((v3(0.0, 1000.0, 0.0), 0.0));
-        let fog = match w.kind {
-            Kind::B612 => (5.0, 15.0),
-            Kind::Desert => (5.0, 16.0),
+        // The haze starts a little beyond the ground the camera looks down
+        // on, so the planet stays clear from the title's height too.
+        let lift = (self.cam.pos.len() - w.surface(self.cam.pos.norm()) - 1.0).max(0.0);
+        let (near, far) = match w.kind {
+            Kind::B612 => (6.0, 18.0),
+            Kind::Desert => (7.0, 22.0),
             Kind::Lamp => (6.0, 20.0),
         };
+        let fog = (near + lift, far + lift * 2.0);
+        let sky_d = w.sky_distance(self.cam.pos);
         let light = Lighting {
             sun: sky.sun,
             sun_col: sky.sun_col,
@@ -629,7 +643,7 @@ impl App {
         // The sky gradient last, on a quad at the far end of the view: only the
         // pixels the planet leaves uncovered are filled, not the whole screen.
         if !crate::prof::skip("backdrop") {
-            draw_backdrop(self.cam.pos + shake, fwd, right, up, 50.0 + warp * 14.0, top, bottom);
+            draw_backdrop(self.cam.pos + shake, fwd, right, up, 50.0 + warp * 14.0, top, bottom, sky_d + 4.0);
         }
         if opaque {
             unsafe {
@@ -641,7 +655,7 @@ impl App {
         // Stars, sun, moon and clouds after the solids, so the depth test
         // rejects whatever the planet hides.
         if !crate::prof::skip("sky") {
-            gl::additive(|| w.draw_sky(g, &spr, self.cam.pos, t, warp, &sky));
+            gl::additive(|| w.draw_sky(g, &spr, self.cam.pos, t, warp, &sky, sky_d));
         }
         crate::prof::mark("sky");
         if self.hero.is_none() {
@@ -702,10 +716,10 @@ impl App {
 
 /// A camera-facing quad just inside the far plane, `top` colour at the top
 /// of the screen fading to `bottom`.
-fn draw_backdrop(cam: V3, fwd: V3, right: V3, up: V3, fovy: f32, top: Color, bottom: Color) {
-    // Well inside the far plane: on a 16-bit depth buffer a backdrop near
-    // it rounds to the cleared depth, fails the test and flickers black.
-    let d = crate::world::SKY_D + 4.0;
+#[allow(clippy::too_many_arguments)]
+fn draw_backdrop(cam: V3, fwd: V3, right: V3, up: V3, fovy: f32, top: Color, bottom: Color, d: f32) {
+    // `d` is well inside the far plane: on a 16-bit depth buffer a backdrop
+    // near it rounds to the cleared depth, fails the test and flickers black.
     let h = d * (fovy.to_radians() * 0.5).tan() * 1.1;
     let w = h * (gl::W as f32 / gl::H as f32) * 1.1;
     let c = cam + fwd * d;

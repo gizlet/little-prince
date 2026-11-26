@@ -15,7 +15,7 @@
 use crate::fx::{Burst, Fx, Particle};
 use crate::gl::{self, lighten, mix, rgb, rgba, Gl, Ink, Sprites};
 use crate::math::{any_perp, approach, place, smooth, v3, Frame, Rng, V3};
-use crate::mesh::{self, no_sway, Builder, Kit, Tile};
+use crate::mesh::{self, no_sway, Builder, Group, Kit, Tile};
 use crate::sound::{Sfx, Sounds};
 use crate::text::T;
 use raylib_sys::Color;
@@ -29,6 +29,29 @@ pub enum Kind {
 }
 
 pub const KINDS: [Kind; 3] = [Kind::B612, Kind::Lamp, Kind::Desert];
+
+impl Kind {
+    /// The planet's mean radius in world units. The book's lamplighter has
+    /// the smallest planet and Earth is by far the largest.
+    pub const fn radius(self) -> f32 {
+        match self {
+            Kind::B612 => 18.0,
+            Kind::Lamp => 15.0,
+            Kind::Desert => 25.0,
+        }
+    }
+
+    /// Seconds from one sunrise to the next. The lamplighter's planet turns
+    /// so fast that he lights and puts out his lamp every few seconds.
+    pub const fn day(self) -> f32 {
+        match self {
+            Kind::B612 => 240.0,
+            Kind::Lamp => 14.0,
+            Kind::Desert => 200.0,
+        }
+    }
+}
+
 const FOX_TRUST: usize = 5;
 /// Up to `CLOSE` from the camera a cell has all its grass, flowers and full
 /// scenery; up to `NEAR` half the grass; up to `MID` only coarser scenery;
@@ -36,7 +59,8 @@ const FOX_TRUST: usize = 5;
 const CLOSE: f32 = 3.0;
 const NEAR: f32 = 6.0;
 const MID: f32 = 16.0;
-/// How far the stars, sun and moon are drawn from the camera.
+/// The nearest the stars, sun and moon are drawn to the camera; farther
+/// when the camera is high enough to see more of the planet than that.
 pub const SKY_D: f32 = 26.0;
 
 /// The sky and light where the prince stands.
@@ -91,50 +115,69 @@ fn bumps(n: V3, s: f32) -> f32 {
 }
 
 fn dune(n: V3) -> f32 {
-    let a = n.dot(v3(0.8, 0.2, 0.55)) * 6.0 + 0.9 * (n.dot(v3(-0.3, 0.9, 0.3)) * 4.0).sin();
+    // Crests about five units apart, bending across the planet.
+    let a = n.dot(v3(0.8, 0.2, 0.55)) * 32.0 + 2.2 * (n.dot(v3(-0.3, 0.9, 0.3)) * 9.0).sin();
     let ridge = 1.0 - a.sin().abs();
-    0.24 * ridge * ridge - 0.1 + 0.05 * bumps(n, 5.0)
+    let swell = 0.9 * bumps(n * 1.5, 5.0) + 0.3 * bumps(n * 5.0, 1.1);
+    // Low ground has gentler crests, so the plain round the spawn stays walkable.
+    (0.35 + 0.15 * swell) * ridge * ridge - 0.15 + swell
 }
 
 fn ground_r(kind: Kind, n: V3) -> f32 {
+    let r = kind.radius();
     match kind {
-        Kind::B612 => 9.0 + 0.55 * bumps(n, 1.7) + 0.2 * bumps(n * 3.0, 4.1) + 0.05 * bumps(n * 9.0, 2.2),
-        Kind::Lamp => 1.45 + 0.012 * bumps(n, 3.0),
-        Kind::Desert => 4.5 + dune(n),
+        Kind::B612 => {
+            r + 1.1 * bumps(n, 1.7)
+                + 0.45 * bumps(n * 3.0, 4.1)
+                + 0.16 * bumps(n * 8.0, 2.2)
+                + 0.05 * bumps(n * 18.0, 0.7)
+        }
+        Kind::Lamp => r + 0.45 * bumps(n, 3.0) + 0.18 * bumps(n * 4.0, 1.3) + 0.04 * bumps(n * 13.0, 2.0),
+        Kind::Desert => r + dune(n),
     }
 }
 
 fn ground_colour(kind: Kind, n: V3, h: f32) -> (Color, f32) {
+    let r = kind.radius();
     match kind {
         Kind::B612 => {
-            let k = ((h - 9.0) / 0.6 * 0.5 + 0.5).clamp(0.0, 1.0);
+            let k = ((h - r) / 1.2 * 0.5 + 0.5).clamp(0.0, 1.0);
             let mut c = mix(rgb(0x557F35), rgb(0x86AE4E), k);
-            c = mix(c, rgb(0xA5B457), smooth((bumps(n * 2.0, 6.0) - 0.3) / 0.4) * 0.5);
-            c = mix(c, rgb(0x46702E), smooth((bumps(n * 5.0, 3.0) - 0.4) / 0.3) * 0.4);
+            c = mix(c, rgb(0xA5B457), smooth((bumps(n * 4.0, 6.0) - 0.3) / 0.4) * 0.5);
+            c = mix(c, rgb(0x46702E), smooth((bumps(n * 10.0, 3.0) - 0.4) / 0.3) * 0.4);
             let d = path_dist(n);
             c = mix(rgb(0xB89D74), c, smooth((d - 0.16) / 0.14));
             (c, 0.0)
         }
         Kind::Lamp => {
-            let k = bumps(n, 9.0) * 0.5 + 0.5;
+            let k = bumps(n * 6.0, 9.0) * 0.5 + 0.5;
             let c = mix(rgb(0xB7A49A), rgb(0xD8C7B4), k);
-            (mix(c, rgb(0xA8B488), smooth((bumps(n, 2.0) - 0.5) / 0.3) * 0.6), 0.0)
+            let c = mix(c, rgb(0x9C8C86), smooth((h - r + 0.2) / -0.4) * 0.5);
+            (mix(c, rgb(0xA8B488), smooth((bumps(n * 3.0, 2.0) - 0.5) / 0.3) * 0.6), 0.0)
         }
         Kind::Desert => {
-            let k = ((h - 4.4) / 0.28).clamp(0.0, 1.0);
+            let k = ((h - r + 0.6) / 1.6).clamp(0.0, 1.0);
             let c = mix(rgb(0xD5A472), rgb(0xF3D8A4), k);
-            let ripple = (n.dot(v3(0.3, 0.2, 0.93)) * 40.0 + bumps(n, 2.0) * 3.0).sin();
+            let ripple = (n.dot(v3(0.3, 0.2, 0.93)) * 220.0 + bumps(n * 4.0, 2.0) * 3.0).sin();
             (gl::scale(c, 1.0 + ripple * 0.03), 0.0)
         }
     }
 }
 
-/// A direction `f` radians ahead of the spawn (towards +Z) and `s` to the side.
+/// A direction `f` radians ahead of the spawn (towards +Z) and `s` to the
+/// side.
 fn spot(f: f32, s: f32) -> V3 {
     V3::Y.rotate(v3(1.0, 0.0, 0.0), f).rotate(v3(0.0, 0.0, 1.0), -s).norm()
 }
 
-/// Picks `count` directions at least `sep` radians from each other and from `taken`.
+/// A direction `f` units ahead of the spawn and `s` to the side, walking
+/// over a planet of radius `r`.
+fn spot_at(r: f32, f: f32, s: f32) -> V3 {
+    spot(f / r, s / r)
+}
+
+/// Picks `count` directions at least `sep` radians from each other and from
+/// `taken`.
 fn scatter(rng: &mut Rng, count: usize, sep: f32, taken: &mut Vec<V3>, accept: &dyn Fn(V3) -> bool) -> Vec<V3> {
     let mut out = Vec::new();
     let cos = sep.cos();
@@ -151,6 +194,12 @@ fn scatter(rng: &mut Rng, count: usize, sep: f32, taken: &mut Vec<V3>, accept: &
     out
 }
 
+/// A steady pseudo-random number in 0..1 for a direction, for thinning out
+/// scenery without a random number generator.
+fn hash01(d: V3) -> f32 {
+    ((d.x * 127.1 + d.y * 311.7 + d.z * 74.7).sin() * 43758.547).fract().abs()
+}
+
 fn jitter(c: Color, rng: &mut Rng, k: f32) -> Color {
     gl::scale(c, 1.0 + rng.range(-k, k))
 }
@@ -161,20 +210,20 @@ fn b612_path() -> &'static [V3] {
     static P: std::sync::OnceLock<Vec<V3>> = std::sync::OnceLock::new();
     P.get_or_init(|| {
         let way = [
-            spot(-0.28, -0.12),
-            spot(-0.1, -0.02),
-            spot(0.06, 0.0),
-            spot(0.18, -0.08),
-            spot(0.27, -0.06),
-            spot(0.45, -0.12),
-            spot(0.6, 0.08),
-            spot(0.68, 0.3),
-            spot(0.6, 0.55),
-            spot(0.4, 0.58),
-            spot(0.22, 0.42),
-            spot(0.08, 0.26),
-            spot(-0.04, 0.12),
-            spot(-0.1, -0.02),
+            b612_spot(-0.28, -0.12),
+            b612_spot(-0.1, -0.02),
+            b612_spot(0.06, 0.0),
+            b612_spot(0.18, -0.08),
+            b612_spot(0.27, -0.06),
+            b612_spot(0.45, -0.12),
+            b612_spot(0.6, 0.08),
+            b612_spot(0.68, 0.3),
+            b612_spot(0.6, 0.55),
+            b612_spot(0.4, 0.58),
+            b612_spot(0.22, 0.42),
+            b612_spot(0.08, 0.26),
+            b612_spot(-0.04, 0.12),
+            b612_spot(-0.1, -0.02),
         ];
         let mut out = Vec::new();
         for w in way.windows(2) {
@@ -182,7 +231,7 @@ fn b612_path() -> &'static [V3] {
             let side = a.cross(b).norm();
             for i in 0..24 {
                 let t = i as f32 / 24.0;
-                let wig = (t * TAU + a.x * 13.0).sin() * 0.012;
+                let wig = (t * TAU + a.x * 13.0).sin() * 0.012 * B612_SPREAD;
                 out.push((a.lerp(b, t).norm() + side * wig).norm());
             }
         }
@@ -192,7 +241,16 @@ fn b612_path() -> &'static [V3] {
 
 /// Distance from `n` to the path, in world units on B612.
 fn path_dist(n: V3) -> f32 {
-    b612_path().iter().map(|p| (n - *p).len()).fold(f32::MAX, f32::min) * 9.0
+    b612_path().iter().map(|p| (n - *p).len()).fold(f32::MAX, f32::min) * Kind::B612.radius()
+}
+
+/// B612 was laid out in radians on a planet of radius 9; on the bigger planet
+/// the same plan spreads half as far again in world units.
+const B612_SPREAD: f32 = 9.0 * 1.5 / Kind::B612.radius();
+
+/// A direction on B612's plan, `f` and `s` in its original radians.
+fn b612_spot(f: f32, s: f32) -> V3 {
+    spot(f * B612_SPREAD, s * B612_SPREAD)
 }
 
 fn baobab(b: &mut Builder, n: V3, r: f32, rng: &mut Rng) {
@@ -376,7 +434,7 @@ struct Fox {
 
 impl Fox {
     fn new(spawn: V3) -> Self {
-        let n = spot(0.56, 0.14);
+        let n = spot_at(Kind::Desert.radius(), 3.8, 0.9);
         Self {
             n,
             face: (spawn - n).flatten(n).norm(),
@@ -495,11 +553,14 @@ struct Shooting {
 pub struct World {
     pub kind: Kind,
     pub radius: f32,
+    /// The distance from the centre to the highest point of the ground or scenery.
+    top: f32,
     pal: Pal,
     sun0: V3,
     period: f32,
     pub spawn: V3,
     tiles: Vec<Tile>,
+    groups: Vec<Group>,
     clouds: Vec<(V3, V3, f32, f32)>,
     butterflies: Vec<(V3, f32, Color)>,
     volcanoes: Vec<Volcano>,
@@ -534,7 +595,7 @@ impl World {
                     accent: rgb(0xFFC15E),
                 },
                 v3(0.3, 0.78, -0.55).norm(),
-                240.0,
+                kind.day(),
             ),
             Kind::Lamp => (
                 Pal {
@@ -546,7 +607,7 @@ impl World {
                     accent: rgb(0xFFD27A),
                 },
                 v3(0.0, 0.75, -0.66).norm(),
-                14.0,
+                kind.day(),
             ),
             Kind::Desert => (
                 Pal {
@@ -558,18 +619,13 @@ impl World {
                     accent: rgb(0xFF9F6B),
                 },
                 v3(0.25, -0.05, -0.97).norm(),
-                200.0,
+                kind.day(),
             ),
         };
         let spawn = V3::Y;
         let r = move |n: V3| ground_r(kind, n);
-        let subdiv = match kind {
-            Kind::B612 => 5,
-            Kind::Desert => 5,
-            Kind::Lamp => 4,
-        };
-        let ground = mesh::planet(subdiv, &r, &|n, h| ground_colour(kind, n, h));
-        let grass;
+        let ground = mesh::planet(6, &r, &|n, h| ground_colour(kind, n, h));
+        let mut grass;
         let mut stars: Vec<Star> = (0..360)
             .map(|_| Star { d: rng.dir(), size: rng.range(0.12, 0.42), phase: rng.range(0.0, TAU), col: rgb(0xE8EEFF) })
             .collect();
@@ -581,11 +637,13 @@ impl World {
         let mut w = World {
             kind,
             radius: r(spawn),
+            top: 0.0,
             pal,
             sun0,
             period,
             spawn,
             tiles: Vec::new(),
+            groups: Vec::new(),
             clouds: Vec::new(),
             butterflies: Vec::new(),
             volcanoes: Vec::new(),
@@ -608,15 +666,22 @@ impl World {
         props.lo = Some(Box::default());
         let mut decor = Builder::default();
         let mut taken = vec![spawn];
+        // Distances below are in world units: `ang` turns them into radians
+        // on this planet and `within` into the cosine of that angle.
+        let rad = kind.radius();
+        let ang = move |u: f32| u / rad;
+        let within = move |u: f32| (u / rad).cos();
         match kind {
             Kind::B612 => {
                 let r = &r;
                 let off_path = |d: V3, w: f32| path_dist(d) > w;
                 // Two smoking volcanoes and an extinct one, as in the book.
-                for (i, n) in [spot(0.3, -0.2), spot(0.37, -0.07), spot(0.33, 0.3)].into_iter().enumerate() {
+                for (i, n) in
+                    [b612_spot(0.3, -0.2), b612_spot(0.37, -0.07), b612_spot(0.33, 0.3)].into_iter().enumerate()
+                {
                     taken.push(n);
                     let active = i < 2;
-                    let k = 2.2;
+                    let k = 2.6;
                     let base = n * (r(n) - 0.06);
                     let col = if active { rgb(0x9C7462) } else { rgb(0x8E8896) };
                     mesh::frustum(&mut props, base, n, 20, (0.0, 0.22 * k, 0.21 * k, 0.1 * k), col, &no_sway, false);
@@ -642,11 +707,11 @@ impl World {
                     );
                     w.volcanoes.push(Volcano { top: base + n * (0.23 * k), n, active, puff: rng.f() });
                 }
-                let rn = spot(0.11, 0.06);
+                let rn = b612_spot(0.11, 0.06);
                 taken.push(rn);
                 w.rose = Some(Rose { n: rn, pos: rn * r(rn), open: 0.6, look: any_perp(rn), near: false });
                 // A chair for watching sunsets, turned towards the sun.
-                let cn = spot(-0.08, 0.14);
+                let cn = b612_spot(-0.08, 0.14);
                 taken.push(cn);
                 let f = Frame::new(cn * (r(cn) - 0.01), cn, -w.sun0);
                 let wood = rgb(0xB57D52);
@@ -676,22 +741,23 @@ impl World {
                     );
                 }
                 mesh::cuboid(&mut props, f.at(v3(0.0, 0.3, -0.08)), [f.x * 0.09, f.y * 0.04, f.z * 0.012], wood);
-                // The baobab that was not pulled up in time: a landmark on the far hill.
-                let bn = spot(0.72, 0.38);
-                taken.push(bn);
-                baobab(&mut props, bn, r(bn), &mut rng);
+                // The baobab that was not pulled up in time, a landmark on the
+                // far hill, and two more over the horizon to walk towards.
+                for bn in [b612_spot(0.72, 0.38), spot(1.75, -0.7), spot(-1.3, 1.25)] {
+                    taken.push(bn);
+                    baobab(&mut props, bn, r(bn), &mut rng);
+                }
                 // A wooden fence along the path by the rose.
                 let path = b612_path();
-                for (i, w2) in path[30..58].windows(2).enumerate().step_by(3) {
+                for w2 in path[30..58].windows(2).step_by(3) {
                     let (a, b) = (w2[0], w2[1]);
-                    let side = a.cross(b - a).norm() * (0.06 / 9.0);
-                    let p0 = (a + side * 6.0).norm();
-                    let _ = i;
+                    let side = a.cross(b - a).norm() * (0.36 / rad);
+                    let p0 = (a + side).norm();
                     fence_post(&mut props, p0, r(p0));
                 }
                 for k in (30..55).step_by(3) {
                     let (a, b) = (path[k], path[k + 3]);
-                    let side = a.cross(b - a).norm() * (0.36 / 9.0);
+                    let side = a.cross(b - a).norm() * (0.36 / rad);
                     let (p0, p1) = ((a + side).norm(), (b + side).norm());
                     for h in [0.11f32, 0.21] {
                         let (q0, q1) = (p0 * (r(p0) + h), p1 * (r(p1) + h));
@@ -701,7 +767,9 @@ impl World {
                         mesh::cuboid(&mut props, (q0 + q1) * 0.5, [d * 0.5, up * 0.014, x * 0.012], rgb(0xA8754C));
                     }
                 }
-                for n in scatter(&mut rng, 7, 0.09, &mut taken, &|d| d.dot(V3::Y) > 0.9 && off_path(d, 0.35)) {
+                for n in
+                    scatter(&mut rng, 7, ang(0.8), &mut taken, &|d| d.dot(V3::Y) > within(6.0) && off_path(d, 0.35))
+                {
                     w.sprouts.push(Sprout {
                         n,
                         pos: n * r(n),
@@ -710,23 +778,30 @@ impl World {
                         phase: rng.f() * TAU,
                     });
                 }
-                for n in scatter(&mut rng, 30, 0.14, &mut taken, &|d| off_path(d, 0.9) && d.dot(V3::Y) < 0.985) {
+                // Woods and meadows thin out away from the path, so the far
+                // side of the planet stays open and cheap to draw.
+                let lush = |d: V3| 1.0 - 0.65 * smooth((path_dist(d) - 5.0) / 9.0);
+                for n in scatter(&mut rng, 80, ang(1.4), &mut taken, &|d| {
+                    off_path(d, 0.9) && d.dot(V3::Y) < within(2.5) && hash01(d) < lush(d)
+                }) {
                     tree(&mut props, Kind::B612, n, r(n), &mut rng);
                 }
-                for n in scatter(&mut rng, 70, 0.05, &mut taken, &|d| off_path(d, 0.5)) {
+                for n in scatter(&mut rng, 180, ang(0.5), &mut taken, &|d| off_path(d, 0.5) && hash01(d) < lush(d)) {
                     bush(&mut props, n, r(n), &mut rng);
                 }
-                for n in scatter(&mut rng, 140, 0.035, &mut taken, &|d| off_path(d, 0.35)) {
+                for n in scatter(&mut rng, 360, ang(0.36), &mut taken, &|d| off_path(d, 0.35)) {
                     let size = if rng.f() < 0.2 { rng.range(0.25, 0.5) } else { rng.range(0.06, 0.18) };
                     mossy_rock(&mut props, n, r(n), size, &mut rng);
                 }
                 // Patches of flowers: daisies, pink, yellow and lilac.
                 let flowers =
                     [rgb(0xFFFFFF), rgb(0xFFF6E0), rgb(0xFFB3C8), rgb(0xFFE070), rgb(0xC6A8F0), rgb(0xFF8FA3)];
+                let gap = within(0.25);
+                let spread = ang(0.22);
                 let mut placed = 0;
-                while placed < 600 {
+                while placed < 1400 {
                     let c = rng.dir();
-                    if !off_path(c, 0.35) || taken.iter().any(|t| t.dot(c) > 0.9996) {
+                    if !off_path(c, 0.35) || taken.iter().any(|t| t.dot(c) > gap) || hash01(c) > lush(c) {
                         continue;
                     }
                     placed += 1;
@@ -734,26 +809,28 @@ impl World {
                     let t1 = any_perp(c);
                     let t2 = c.cross(t1);
                     for _ in 0..(2 + rng.next() % 5) {
-                        let n = (c + t1 * rng.range(-0.025, 0.025) + t2 * rng.range(-0.025, 0.025)).norm();
+                        let n = (c + t1 * rng.range(-spread, spread) + t2 * rng.range(-spread, spread)).norm();
                         flower(&mut decor, n, r(n), col, &mut rng);
                     }
                 }
                 let bare = taken.clone();
-                let keep = move |d: V3| path_dist(d) > 0.28 && bare.iter().all(|t| t.dot(d) < 0.99985);
+                let clear = within(0.16);
+                let keep =
+                    move |d: V3| path_dist(d) > 0.28 && hash01(d) < lush(d) && bare.iter().all(|t| t.dot(d) < clear);
                 grass = mesh::grass(
                     &mut rng,
-                    15000,
+                    30000,
                     r,
                     &keep,
                     (0.09, 0.21),
                     &[rgb(0x5A8C3A), rgb(0x6C9C42), rgb(0x7FAD4C), rgb(0x93BB58), rgb(0x4D7A33), rgb(0xA3B95A)],
                 );
-                for _ in 0..18 {
+                for _ in 0..30 {
                     let d = rng.dir();
-                    w.clouds.push((d, any_perp(d), rng.range(0.006, 0.014), rng.range(0.9, 1.6)));
+                    w.clouds.push((d, any_perp(d), rng.range(0.004, 0.01), rng.range(1.2, 2.2)));
                 }
                 for _ in 0..40 {
-                    let d = (V3::Y + rng.dir() * 0.4).norm();
+                    let d = (V3::Y + rng.dir() * 0.25).norm();
                     let c = [rgb(0xFFF3A8), rgb(0xFFFFFF), rgb(0xFFB0C8), rgb(0xA8D8FF), rgb(0xFFC070)]
                         [(rng.next() % 5) as usize];
                     w.butterflies.push((d, rng.f() * TAU, c));
@@ -761,7 +838,7 @@ impl World {
                 w.total = w.sprouts.len();
             }
             Kind::Lamp => {
-                let ln = spot(0.42, 0.05);
+                let ln = spot_at(rad, 2.6, 0.3);
                 taken.push(ln);
                 let base = ln * (r(ln) - 0.02);
                 let iron = rgb(0x34304A);
@@ -769,7 +846,7 @@ impl World {
                 mesh::frustum(&mut props, base, ln, 10, (0.0, 0.02, 0.84, 0.016), iron, &no_sway, true);
                 mesh::frustum(&mut props, base + ln * 0.84, ln, 10, (0.0, 0.03, 0.03, 0.03), iron, &no_sway, true);
                 w.lamp = Some(LampPost { n: ln, head: base + ln * 0.93, lit: false, on: 0.0 });
-                let kn = ln.rotate(any_perp(ln).rotate(ln, 1.2), 0.17);
+                let kn = ln.rotate(any_perp(ln).rotate(ln, 1.2), ang(0.25));
                 taken.push(kn);
                 w.keeper = Some(Keeper {
                     n: kn,
@@ -778,12 +855,20 @@ impl World {
                     anim: None,
                     raise: 0.0,
                 });
-                for n in scatter(&mut rng, 5, 0.4, &mut taken, &|_| true) {
-                    rock(&mut props, n, r(n), rgb(0xA89A92), 0.06, &mut rng);
+                // A bare, stony little world: boulders, pebbles, and a few
+                // flowers and tufts sheltering between them.
+                for n in scatter(&mut rng, 40, ang(2.5), &mut taken, &|d| d.dot(ln) < within(1.5)) {
+                    rock(&mut props, n, r(n), rgb(0x9C8E88), rng.range(0.25, 0.6), &mut rng);
                 }
-                for _ in 0..30 {
+                for n in scatter(&mut rng, 260, ang(0.6), &mut taken, &|d| d.dot(ln) < within(1.0)) {
+                    rock(&mut props, n, r(n), rgb(0xA89A92), rng.range(0.04, 0.14), &mut rng);
+                }
+                let gap = within(0.17);
+                let mut placed = 0;
+                while placed < 900 {
                     let n = rng.dir();
-                    if taken.iter().all(|t| t.dot(n) < 0.993) {
+                    if taken.iter().all(|t| t.dot(n) < gap) && hash01(n * 3.0) < 0.5 {
+                        placed += 1;
                         let c = [rgb(0xFFFFFF), rgb(0xFFB8C8), rgb(0xFFE27A)][(rng.next() % 3) as usize];
                         flower(&mut decor, n, r(n), c, &mut rng);
                     }
@@ -791,17 +876,17 @@ impl World {
                 let bare = taken.clone();
                 grass = mesh::grass(
                     &mut rng,
-                    300,
+                    9000,
                     &r,
-                    &|d| bare.iter().all(|t| t.dot(d) < 0.993),
-                    (0.03, 0.07),
+                    &|d| bare.iter().all(|t| t.dot(d) < gap) && hash01(d * 3.0) < 0.5,
+                    (0.04, 0.1),
                     &[rgb(0x8FB070), rgb(0xA0BE7A)],
                 );
                 w.total = 44;
             }
             Kind::Desert => {
                 // The biplane, nose down in the sand.
-                let pn = spot(0.3, -0.2);
+                let pn = spot_at(rad, 2.0, -1.3);
                 taken.push(pn);
                 let heading = any_perp(pn).rotate(pn, 0.9);
                 let up = pn.rotate(heading, 0.16).rotate(pn.cross(heading), 0.12).norm();
@@ -870,11 +955,16 @@ impl World {
                 let fox = Fox::new(spawn);
                 taken.push(fox.n);
                 w.fox = Some(fox);
-                let wheat = spot(0.1, 0.3);
-                for n in scatter(&mut rng, 12, 0.12, &mut taken, &|d| d.dot(wheat) < 0.96) {
+                let wheat = spot_at(rad, 0.7, 2.2);
+                let field_edge = within(1.6);
+                let off_field = within(2.4);
+                for n in scatter(&mut rng, 30, ang(3.0), &mut taken, &|d| d.dot(wheat) < off_field) {
+                    rock(&mut props, n, r(n), rgb(0xB08A70), rng.range(0.3, 0.7), &mut rng);
+                }
+                for n in scatter(&mut rng, 90, ang(1.2), &mut taken, &|d| d.dot(wheat) < off_field) {
                     rock(&mut props, n, r(n), rgb(0xB9937A), 0.12, &mut rng);
                 }
-                for n in scatter(&mut rng, 10, 0.1, &mut taken, &|d| d.dot(wheat) < 0.96) {
+                for n in scatter(&mut rng, 140, ang(0.8), &mut taken, &|d| d.dot(wheat) < off_field) {
                     let c = jitter(rgb(0x9C8F5A), &mut rng, 0.1);
                     let x = any_perp(n);
                     mesh::ellipsoid(
@@ -888,20 +978,34 @@ impl World {
                     );
                 }
                 let bare = taken.clone();
-                let field = move |d: V3| d.dot(wheat) > 0.982 && bare.iter().all(|t| t.dot(d) < 0.9993);
+                let clear = within(0.15);
+                let field = move |d: V3| d.dot(wheat) > field_edge && bare.iter().all(|t| t.dot(d) < clear);
                 grass = mesh::grass(
                     &mut rng,
-                    1600,
+                    3500,
                     &r,
                     &field,
                     (0.1, 0.22),
                     &[rgb(0xC99E48), rgb(0xB68C3C), rgb(0xD6B25A)],
                 );
+                // Dry tufts here and there over the dunes.
+                let bare = taken.clone();
+                let tufts = move |d: V3| {
+                    d.dot(wheat) < off_field && hash01(d * 2.0) < 0.12 && bare.iter().all(|t| t.dot(d) < clear)
+                };
+                grass.append(&mesh::grass(
+                    &mut rng,
+                    2400,
+                    &r,
+                    &tufts,
+                    (0.06, 0.14),
+                    &[rgb(0xB59A5A), rgb(0xA08850), rgb(0xC2AE70)],
+                ));
                 w.total = FOX_TRUST;
             }
         }
         let lo = props.lo.take().map(|b| *b).unwrap_or_default();
-        w.tiles = mesh::tiles(
+        (w.tiles, w.groups) = mesh::tiles(
             [ground, props, lo, decor, grass],
             mesh::TileLayers {
                 props: !crate::prof::skip("props"),
@@ -909,6 +1013,7 @@ impl World {
                 grass: !crate::prof::skip("grass"),
             },
         );
+        w.top = w.tiles.iter().map(|t| t.top).fold(w.radius, f32::max);
         w
     }
 
@@ -958,6 +1063,17 @@ impl World {
             night: wn,
             ink: w3(rgb(0x4A3540), rgb(0x45304A), rgb(0x1E1A3C)),
         }
+    }
+
+    /// How far from `cam` the sky goes: beyond everything on the planet the
+    /// camera can see, over the horizon included, and never nearer than
+    /// `SKY_D`. Kept as near as it can be, for the handheld's 16-bit depth
+    /// buffer.
+    pub fn sky_distance(&self, cam: V3) -> f32 {
+        let r = self.radius;
+        let to_horizon = (cam.dot(cam) - r * r).max(0.0).sqrt();
+        let beyond = (self.top * self.top - r * r).max(0.0).sqrt();
+        (to_horizon + beyond + 1.0).max(SKY_D)
     }
 
     /// The lamp's light, if there is one and it is lit.
@@ -1183,10 +1299,10 @@ impl World {
 
     /// Stars, the sun and the moon, behind everything (additive). `warp`
     /// stretches the stars into streaks.
-    pub fn draw_sky(&self, gl: &Gl, s: &Sprites, cam: V3, t: f32, warp: f32, sky: &Sky) {
+    pub fn draw_sky(&self, gl: &Gl, s: &Sprites, cam: V3, t: f32, warp: f32, sky: &Sky, d: f32) {
         // The sky sits 26 units away, in front of the backdrop at 30: on a
         // 16-bit depth buffer anything much farther rounds to the far plane.
-        let k = SKY_D / 70.0;
+        let k = d / 70.0;
         let stars = sky.stars.max(warp);
         Sprites::begin(gl.sprite);
         if stars > 0.01 {
@@ -1236,21 +1352,23 @@ impl World {
 
     /// Queues the visible planet tiles front to back for early depth rejection.
     fn queue_tiles(&self, gl: &Gl, cam: V3, fwd: V3) {
-        const MAX_HEIGHT: f32 = 4.0;
         const VIEW_DISTANCE: f32 = 60.0;
         let r = self.radius;
         let cam_dist = cam.len().max(r + 0.01);
         let cam_dir = cam * (1.0 / cam_dist);
-        let horizon = (r / cam_dist).min(1.0).acos() + (r / (r + MAX_HEIGHT)).min(1.0).acos();
+        let cam_horizon = (r / cam_dist).min(1.0).acos();
         let mut visible = Vec::with_capacity(self.tiles.len());
         // Preserve the existing tie order for equally distant cells.
         for tile in self.tiles.iter().rev() {
+            // A cell shows above the horizon as far as its highest point reaches.
+            let height = (tile.top - r).max(0.3);
+            let horizon = cam_horizon + (r / (r + height)).acos();
             let theta = tile.dir.dot(cam_dir).clamp(-1.0, 1.0).acos();
             if theta - tile.ang > horizon + 0.05 {
                 continue;
             }
             let extent = r * tile.ang;
-            let bound = extent + MAX_HEIGHT;
+            let bound = extent + height;
             let delta = tile.dir * r - cam;
             let dist = delta.len();
             if dist - bound < VIEW_DISTANCE && delta.dot(fwd) > -bound {
@@ -1258,6 +1376,18 @@ impl World {
             }
         }
         visible.sort_by(|a, b| a.0.total_cmp(&b.0));
+        // A group whose cells in view are all far away is drawn as one mesh,
+        // where its nearest cell would have been.
+        let mut near_cells = vec![0u8; self.groups.len()];
+        let mut far_cells = vec![0u8; self.groups.len()];
+        for (dist, tile) in &visible {
+            if *dist < MID {
+                near_cells[tile.group] += 1;
+            } else {
+                far_cells[tile.group] += 1;
+            }
+        }
+        let mut drawn = vec![false; self.groups.len()];
         for (dist, tile) in visible {
             let (mesh, lod) = if dist < CLOSE {
                 (tile.close, "close")
@@ -1265,6 +1395,11 @@ impl World {
                 (tile.near, "near")
             } else if dist < MID {
                 (tile.mid, "mid")
+            } else if near_cells[tile.group] == 0 && far_cells[tile.group] > 1 {
+                if std::mem::replace(&mut drawn[tile.group], true) {
+                    continue;
+                }
+                (self.groups[tile.group].far, "far")
             } else {
                 (tile.far, "far")
             };
@@ -1588,6 +1723,35 @@ fn draw_fox(gl: &Gl, kit: &Kit, f: &Fox, r: f32, t: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn planets_are_between_15_and_25_units_across_with_the_lamplighters_the_smallest() {
+        for kind in KINDS {
+            let r = kind.radius();
+            assert!((15.0..=25.0).contains(&r), "{kind:?} {r}");
+            let mut rng = Rng::new(5);
+            for _ in 0..2000 {
+                let h = ground_r(kind, rng.dir());
+                assert!((h - r).abs() < 2.5, "{kind:?} ground at {h}");
+            }
+        }
+        assert!(KINDS.iter().all(|k| Kind::Lamp.radius() <= k.radius()));
+        assert!(KINDS.iter().all(|k| Kind::Desert.radius() >= k.radius()));
+    }
+
+    #[test]
+    fn the_lamplighters_day_still_lasts_14_seconds() {
+        assert_eq!(Kind::Lamp.day(), 14.0);
+    }
+
+    #[test]
+    fn the_fox_starts_a_walk_away_from_the_spawn() {
+        let spawn = V3::Y;
+        let fox = Fox::new(spawn);
+        let r = Kind::Desert.radius();
+        let d = (fox.n * r - spawn * r).len();
+        assert!((3.0..5.0).contains(&d), "{d}");
+    }
 
     #[test]
     fn spots_are_ahead_of_the_spawn() {
