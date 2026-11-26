@@ -1,0 +1,14 @@
+# The Little Prince's Gizlet app manifest. scripts/package.sh copies it
+# to the root of the app folder, so the paths below are relative to that
+# folder. Keep version in step with Cargo.toml.
+id = "io.gizlet.littleprince"
+version = "0.2.0"
+name = "The Little Prince"
+kind = "game"
+runtime = 1
+arch = "aarch64"
+exec = "bin/littleprince"
+icon = "icon.png"
+
+[names]
+zh-CN = "小王子"
