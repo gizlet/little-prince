@@ -10,8 +10,11 @@
 use crate::input::{Button, RawPad};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 
+const EV_SYN: u16 = 0x00;
 const EV_KEY: u16 = 0x01;
 const EV_ABS: u16 = 0x03;
+const SYN_REPORT: u16 = 0;
+const SYN_DROPPED: u16 = 3;
 const KEY_CNT: usize = 0x300;
 
 const KEY_A: usize = 30;
@@ -87,6 +90,13 @@ struct Abs {
 }
 
 impl Abs {
+    fn read(fd: libc::c_int, code: usize) -> Option<Self> {
+        let mut info: libc::input_absinfo = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of_val(&info);
+        let result = unsafe { libc::ioctl(fd, eviocg(0x40 + code as u64, size) as _, &mut info) };
+        (result == 0).then_some(Abs { value: info.value, min: info.minimum, max: info.maximum, flat: info.flat })
+    }
+
     /// -1..1 around the middle of the range, with the driver's dead zone.
     fn centered(self) -> f32 {
         let half = (self.max - self.min) as f32 / 2.0;
@@ -119,9 +129,16 @@ struct Device {
     keys: Vec<bool>,
     abs: [Abs; ABS_CNT],
     has_abs: [bool; ABS_CNT],
+    awaiting_report: bool,
 }
 
 impl Device {
+    fn read_pressed_keys(fd: libc::c_int) -> Option<Vec<bool>> {
+        let mut held = [0u8; KEY_CNT / 8];
+        let result = unsafe { libc::ioctl(fd, eviocg(0x18, held.len()) as _, held.as_mut_ptr()) };
+        (result >= 0).then(|| (0..KEY_CNT).map(|k| bit(&held, k)).collect())
+    }
+
     fn open(path: &str) -> Option<Device> {
         let c = std::ffi::CString::new(path).ok()?;
         let raw = unsafe { libc::open(c.as_ptr(), libc::O_RDONLY | libc::O_NONBLOCK | libc::O_CLOEXEC) };
@@ -148,21 +165,30 @@ impl Device {
             if !bit(&abs_bits, code) {
                 continue;
             }
-            let mut info: libc::input_absinfo = unsafe { std::mem::zeroed() };
-            let size = std::mem::size_of::<libc::input_absinfo>();
-            if unsafe { libc::ioctl(raw, eviocg(0x40 + code as u64, size) as _, &mut info) } == 0 {
-                *slot = Abs { value: info.value, min: info.minimum, max: info.maximum, flat: info.flat };
+            if let Some(state) = Abs::read(raw, code) {
+                *slot = state;
                 has_abs[code] = true;
             }
         }
-        // Buttons already held when the launcher starts.
-        let mut held = [0u8; KEY_CNT / 8];
-        unsafe { libc::ioctl(raw, eviocg(0x18, held.len()) as _, held.as_mut_ptr()) };
-        let keys = (0..KEY_CNT).map(|k| bit(&held, k)).collect();
-        Some(Device { path: path.to_string(), fd, gamepad, keys, abs, has_abs })
+        let keys = Self::read_pressed_keys(raw).unwrap_or_else(|| vec![false; KEY_CNT]);
+        Some(Device { path: path.to_string(), fd, gamepad, keys, abs, has_abs, awaiting_report: false })
     }
 
-    /// Applies pending events. False when the device is gone.
+    /// Reads EVIOCGKEY and EVIOCGABS after the event stream has lost state.
+    fn refresh_state(&mut self) -> bool {
+        let fd = self.fd.as_raw_fd();
+        let Some(keys) = Self::read_pressed_keys(fd) else { return false };
+        for (code, abs) in self.abs.iter_mut().enumerate() {
+            if self.has_abs[code] {
+                let Some(state) = Abs::read(fd, code) else { return false };
+                *abs = state;
+            }
+        }
+        self.keys = keys;
+        true
+    }
+
+    /// Applies pending events. False when the device is gone or cannot resync.
     fn read(&mut self) -> bool {
         let mut events: [libc::input_event; 64] = unsafe { std::mem::zeroed() };
         loop {
@@ -175,13 +201,8 @@ impl Device {
                 return false;
             }
             let count = n as usize / std::mem::size_of::<libc::input_event>();
-            for e in &events[..count] {
-                let code = e.code as usize;
-                match e.type_ {
-                    EV_KEY if code < KEY_CNT && e.value != 2 => self.keys[code] = e.value != 0,
-                    EV_ABS if code < ABS_CNT => self.abs[code].value = e.value,
-                    _ => {}
-                }
+            if !self.apply_events(&events[..count], Self::refresh_state) {
+                return false;
             }
             if count < events.len() {
                 return true;
@@ -189,7 +210,30 @@ impl Device {
         }
     }
 
+    fn apply_events(&mut self, events: &[libc::input_event], refresh_state: impl FnOnce(&mut Self) -> bool) -> bool {
+        let mut refresh = false;
+        for e in events {
+            match (e.type_, e.code) {
+                (EV_SYN, SYN_DROPPED) => self.awaiting_report = true,
+                (EV_SYN, SYN_REPORT) if self.awaiting_report => {
+                    self.awaiting_report = false;
+                    refresh = true;
+                }
+                _ if self.awaiting_report || refresh => {}
+                (EV_KEY, code) if (code as usize) < KEY_CNT && e.value != 2 => self.keys[code as usize] = e.value != 0,
+                (EV_ABS, code) if (code as usize) < ABS_CNT => self.abs[code as usize].value = e.value,
+                _ => {}
+            }
+        }
+        // The snapshot also covers events already buffered after SYN_REPORT.
+        // If another overflow is in progress, wait for its report first.
+        !refresh || self.awaiting_report || refresh_state(self)
+    }
+
     fn apply(&self, pad: &mut RawPad) {
+        if self.awaiting_report {
+            return;
+        }
         for (code, b) in MAP {
             if self.keys[code] {
                 pad.set(b);
@@ -264,5 +308,64 @@ impl Evdev {
             gamepad |= d.gamepad;
         }
         gamepad
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn event(type_: u16, code: usize, value: i32) -> libc::input_event {
+        libc::input_event { type_, code: code as u16, value, ..unsafe { std::mem::zeroed() } }
+    }
+
+    #[test]
+    fn dropped_release_recovers_buttons_and_axes_across_reads() {
+        let fd = std::fs::File::open("/dev/null").unwrap().into();
+        let mut device = Device {
+            path: String::new(),
+            fd,
+            gamepad: true,
+            keys: vec![false; KEY_CNT],
+            abs: [Abs::default(); ABS_CNT],
+            has_abs: [false; ABS_CNT],
+            awaiting_report: false,
+        };
+        device.has_abs[ABS_X] = true;
+        device.abs[ABS_X] = Abs { min: -100, max: 100, ..Abs::default() };
+        let initial = [event(EV_KEY, BTN_DPAD_RIGHT, 1), event(EV_ABS, ABS_X, 75)];
+        assert!(device.apply_events(&initial, |_| panic!("unexpected resync")));
+        let mut pad = RawPad::default();
+        device.apply(&mut pad);
+        assert!(pad.buttons[Button::Right as usize]);
+        assert_eq!(pad.axes[0], 0.75);
+
+        // Releases were lost. No stale state is exposed while awaiting the report.
+        let dropped = [event(EV_SYN, SYN_DROPPED as usize, 0), event(EV_KEY, BTN_DPAD_LEFT, 1)];
+        assert!(device.apply_events(&dropped, |_| panic!("resync must wait for SYN_REPORT")));
+        assert!(!device.keys[BTN_DPAD_LEFT]);
+        let mut pad = RawPad::default();
+        device.apply(&mut pad);
+        assert_eq!(pad.buttons, [false; crate::input::BUTTONS]);
+        assert_eq!(pad.axes, [0.0; 6]);
+
+        let report = [event(EV_SYN, SYN_REPORT as usize, 0), event(EV_ABS, ABS_X, -75)];
+        let mut refreshed = false;
+        assert!(device.apply_events(&report, |d| {
+            refreshed = true;
+            d.keys.fill(false);
+            d.abs[ABS_X].value = 0;
+            true
+        }));
+        assert!(refreshed);
+        device.apply(&mut pad);
+        assert_eq!(pad.buttons, [false; crate::input::BUTTONS]);
+        assert_eq!(pad.axes, [0.0; 6]);
+
+        let next = [event(EV_KEY, BTN_DPAD_LEFT, 1), event(EV_ABS, ABS_X, -50)];
+        assert!(device.apply_events(&next, |_| panic!("unexpected resync")));
+        device.apply(&mut pad);
+        assert!(pad.buttons[Button::Left as usize]);
+        assert_eq!(pad.axes[0], -0.5);
     }
 }
