@@ -735,9 +735,9 @@ impl World {
         2.4 - trust as f32 * 0.28
     }
 
-    /// Where the demo should walk: a point, how near to stop, and whether
+    /// Where autoplay should walk: a point, how near to stop, and whether
     /// to stand still once there.
-    pub fn demo_target(&self, from: V3) -> Option<(V3, f32, bool)> {
+    pub fn autoplay_target(&self, from: V3) -> Option<(V3, f32, bool)> {
         match self.kind {
             Kind::B612 => {
                 let near = |a: &V3, b: &V3| (*a - from).len().total_cmp(&(*b - from).len());

@@ -1,6 +1,6 @@
 # The Little Prince · 小王子
 
-A 3D demo for [Gizlet OS](https://github.com/gizlet/os) handhelds such as the R36S, written in Rust with raylib. A small hooded traveller walks three tiny planets, each lit by its own sun and turning through day, sunset and night, and migrating birds carry it from one planet to the next. It is a test of what a 1.3 GHz quad-core Cortex-A35 with a Mali-G31 can draw on a 640×480 screen. Nothing here is a finished game.
+A 3D game for [Gizlet OS](https://github.com/gizlet/os) handhelds such as the R36S, written in Rust with raylib. A small hooded traveller walks three tiny planets, each lit by its own sun and turning through day, sunset and night, and migrating birds carry it from one planet to the next. It shows what a 1.3 GHz quad-core Cortex-A35 with a Mali-G31 can draw on a 640×480 screen, and grows a little at a time.
 
 ![B612](docs/screenshots/b612.png)
 
@@ -47,14 +47,14 @@ cargo run --release
 | Esc or P | Start | 中文 / English |
 | Backspace or J | B | Back to the title |
 
-Left alone on the title for 12 seconds, it plays a demo by itself and moves on to the next planet every 26 seconds. Hold Select + Start for two seconds to quit.
+Left alone on the title for 12 seconds, it plays by itself (autoplay) and moves on to the next planet every 26 seconds. Hold Select + Start for two seconds to quit.
 
 | Variable | Effect |
 | --- | --- |
 | `GIZLET_LANG=en` | Start in English |
 | `GIZLET_SWAP_AB=1` | Swap A and B |
 | `LITTLEPRINCE_WINDOW=WxH` | Desktop window size (1280x960 by default) |
-| `LITTLEPRINCE_DEMO=1` | Start the demo at once |
+| `LITTLEPRINCE_AUTOPLAY=1` | Start autoplay at once |
 | `LITTLEPRINCE_MUTE=1` | No sound |
 | `LITTLEPRINCE_FX=0\|1\|2` | Effects level (2 on the desktop, 1 on the handheld) |
 | `LITTLEPRINCE_SCALE=0.8` | Render the 3D scene smaller and scale it up |
@@ -62,7 +62,7 @@ Left alone on the title for 12 seconds, it plays a demo by itself and moves on t
 | `LITTLEPRINCE_HERO=Name` | Load `assets/hero/Name.glb` instead of `Rogue_Hooded` (any KayKit Adventurers 1.0 character) |
 | `LITTLEPRINCE_PROFILE=1` | Print the frame time per stage (waiting for the GPU after each) and the triangles drawn, every 3 seconds; `2` prints only the frame time |
 | `LITTLEPRINCE_SKIP=hero,grass,props,flowers,ground,heroink` | Leave parts out, for measuring their cost |
-| `LITTLEPRINCE_CAPTURE=FILE.png` | Render one frame to a PNG and exit; `LITTLEPRINCE_SCENE` is `title`, `b612`, `lamp`, `desert`, `fly`, `model` or `icon`, and `LITTLEPRINCE_AT` the seconds of demo before it |
+| `LITTLEPRINCE_CAPTURE=FILE.png` | Render one frame to a PNG and exit; `LITTLEPRINCE_SCENE` is `title`, `b612`, `lamp`, `desert`, `fly`, `model` or `icon`, and `LITTLEPRINCE_AT` the seconds of autoplay before it |
 
 ```sh
 cargo test
@@ -70,7 +70,7 @@ cargo test
 
 ## Run on Gizlet OS
 
-On the device the demo links Gizlet runtime 1's `libraylib.so.600`, built for DRM with OpenGL ES 2, and reads the handheld's buttons from evdev. `scripts/package.sh` cross-builds it from a Mac with zig as the linker and assembles the app folder.
+On the device the game links Gizlet runtime 1's `libraylib.so.600`, built for DRM with OpenGL ES 2, and reads the handheld's buttons from evdev. `scripts/package.sh` cross-builds it from a Mac with zig as the linker and assembles the app folder.
 
 Requirements: [zig](https://ziglang.org), `rustup target add aarch64-unknown-linux-gnu`, and runtime 1's `libraylib.so`, built in [gizlet/os](https://github.com/gizlet/os) with `bazel build --config=r36s //runtime:raylib`.
 
@@ -80,13 +80,13 @@ scp -r dist/littleprince root@DEVICE:/opt/gizlet/apps/io.gizlet.littleprince/0.2
 ssh root@DEVICE 'cd /opt/gizlet/apps/io.gizlet.littleprince/0.2.0 && /opt/gizlet/runtime/1/bin/gizlet-run bin/littleprince'
 ```
 
-Stop the launcher first (`systemctl stop gizlet-session`) so the demo gets the screen.
+Stop the launcher first (`systemctl stop gizlet-session`) so the game gets the screen.
 
 ### Performance on the R36S
 
 On a genuine R36S (RK3326, Mali-G31 through Panfrost, Mesa 25.0) B612 runs at about 50 fps at the default (mid) effects level, with about 35,000 triangles a frame and about 140 MB of memory. The main thread spends about 18 ms of CPU time per frame; the high effects level (bloom, paper, the hero's outline) costs about 18 ms more.
 
-The biggest single win was giving raylib's render batch 48 buffers in rotation instead of one (`rlLoadRenderBatch`, set with `LITTLEPRINCE_BATCH`). With one buffer, every batch flush rewrites a vertex buffer the GPU is still reading, and Panfrost makes the CPU wait for the GPU each time: about 25 ms a frame went to those waits, and the demo ran at 22 fps. The hero's skinned mesh is double-buffered for the same reason.
+The biggest single win was giving raylib's render batch 48 buffers in rotation instead of one (`rlLoadRenderBatch`, set with `LITTLEPRINCE_BATCH`). With one buffer, every batch flush rewrites a vertex buffer the GPU is still reading, and Panfrost makes the CPU wait for the GPU each time: about 25 ms a frame went to those waits, and the game ran at 22 fps. The hero's skinned mesh is double-buffered for the same reason.
 
 Other changes that helped: batching small character parts into a few draw calls, indexed meshes, cheaper small parts and far-away scenery, lighting scenery per vertex without rim light, chunking the planets so only what is in front of the camera and above the horizon is drawn, skinning the hero on the CPU, drawing straight to the screen below the high effects level, drawing opaque things without blending, the sky after the solids, and a HUD redrawn four times a second and blitted only where it holds something.
 
@@ -102,7 +102,7 @@ Do not pin the GPU clock by hand: setting `min_freq` of `/sys/class/devfreq/ff40
 | --- | --- |
 | `gizlet.toml` | The app manifest |
 | `src/main.rs` | The window, the frame loop, captures |
-| `src/app.rs` | Modes, the follow camera, the demo autopilot, flights between planets, effects from footsteps and landings, the render order |
+| `src/app.rs` | Modes, the follow camera, autoplay, flights between planets, effects from footsteps and landings, the render order |
 | `src/world.rs` | The three planets: ground, scenery, the rose, sprouts, volcanoes, the lamplighter, the fox, the biplane, sky and stars |
 | `src/hero.rs` | Loading the KayKit model, animation blending, bone matrices |
 | `src/player.rs` | Walking on a sphere, jumps, the procedural prince used when no model is found |

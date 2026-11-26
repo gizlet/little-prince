@@ -1,4 +1,4 @@
-//! The Little Prince · 小王子: a 3D planet-walk demo for Gizlet OS
+//! The Little Prince · 小王子: a 3D planet-walk game for Gizlet OS
 //! handhelds in Rust + raylib. The hero walks B612, the lamplighter's
 //! planet and the desert where the fox is tamed, and migrating birds carry
 //! it between them; the HUD shows FPS, CPU load and free memory.
@@ -11,10 +11,10 @@
 //! - `GIZLET_LANG=en`: start in English (Simplified Chinese otherwise).
 //! - `GIZLET_SWAP_AB=1`: swap the A and B buttons.
 //! - `LITTLEPRINCE_WINDOW=WxH`: the desktop window size (default 1280x960).
-//! - `LITTLEPRINCE_DEMO=1`: start the demo autopilot at once.
+//! - `LITTLEPRINCE_AUTOPLAY=1`: start autoplay at once.
 //! - `LITTLEPRINCE_MUTE=1`: no sound.
 //! - `LITTLEPRINCE_CAPTURE=FILE.png` with `LITTLEPRINCE_SCENE` (`title`, `icon`,
-//!   `b612`, `lamp`, `desert`, `fly`) and `LITTLEPRINCE_AT` (seconds of demo first):
+//!   `b612`, `lamp`, `desert`, `fly`) and `LITTLEPRINCE_AT` (seconds of autoplay first):
 //!   render one frame to a PNG and exit.
 
 mod app;
@@ -121,8 +121,8 @@ fn main() {
     let zoom = view().1.max(1.0);
     let mut controls = input::Controls::new();
     let mut app = App::new(lang, zoom, audio);
-    if env_on("LITTLEPRINCE_DEMO") {
-        app.demo = true;
+    if env_on("LITTLEPRINCE_AUTOPLAY") {
+        app.autoplay = true;
         app.start_play(0);
     }
     if capture.is_some() {
@@ -225,7 +225,7 @@ fn setup_capture(app: &mut App, c: &input::Controls) {
                 "desert" => 2,
                 _ => 0,
             };
-            app.demo = true;
+            app.autoplay = true;
             app.start_play(idx);
             step(app, at);
             if scene == "fly" {

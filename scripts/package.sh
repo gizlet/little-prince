@@ -1,5 +1,5 @@
 #!/bin/sh
-# scripts/package.sh [OUT]: builds the Little Prince demo for aarch64 Gizlet OS and
+# scripts/package.sh [OUT]: builds The Little Prince for aarch64 Gizlet OS and
 # assembles the app folder that `gizlet install` takes (dist/littleprince by
 # default).
 #

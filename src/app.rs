@@ -1,5 +1,5 @@
 //! The app: the title, walking a planet and the flight between planets,
-//! carried by migrating birds as in the book; the follow camera, the demo
+//! carried by migrating birds as in the book; the follow camera, the
 //! autopilot, and turning the prince's steps, jumps and landings into dust,
 //! rings and sound.
 
@@ -34,10 +34,10 @@ const PITCH_MAX: f32 = 1.2;
 /// The default hero model and its height in world units.
 const HERO: &str = "Rogue_Hooded";
 pub const HERO_H: f32 = 0.42;
-/// Seconds on the title before the demo starts by itself.
-const IDLE_DEMO: f32 = 12.0;
-/// Seconds the demo spends on each planet.
-const DEMO_STAY: f32 = 26.0;
+/// Seconds on the title before autoplay starts by itself.
+const IDLE_AUTOPLAY: f32 = 12.0;
+/// Seconds autoplay spends on each planet.
+const AUTOPLAY_STAY: f32 = 26.0;
 
 const ANY: [Button; 12] = [
     Button::A,
@@ -86,7 +86,7 @@ pub struct App {
     pub closeup: bool,
     /// 2 high (bloom), 1 mid (paper and lens), 0 low (none).
     pub fx_level: u8,
-    pub demo: bool,
+    pub autoplay: bool,
     pub quit_hold: f32,
     pub quit: bool,
     cam: Cam,
@@ -97,8 +97,8 @@ pub struct App {
     look_t: f32,
     fly_to: usize,
     switched: bool,
-    demo_dir: V3,
-    demo_jump: f32,
+    auto_dir: V3,
+    auto_jump: f32,
     rng: Rng,
 }
 
@@ -135,7 +135,7 @@ impl App {
             hero: Hero::load(&std::env::var("LITTLEPRINCE_HERO").unwrap_or_else(|_| HERO.to_string())),
             closeup: false,
             fx_level: std::env::var("LITTLEPRINCE_FX").ok().and_then(|v| v.parse().ok()).unwrap_or(if cfg!(feature = "gizlet-os") { 1 } else { 2 }).min(2),
-            demo: false,
+            autoplay: false,
             quit_hold: 0.0,
             quit: false,
             cam: Cam { pos: p * 3.0, target: p, up: p.norm() },
@@ -144,8 +144,8 @@ impl App {
             look_t: 10.0,
             fly_to: 0,
             switched: false,
-            demo_dir: cam_fwd,
-            demo_jump: 2.0,
+            auto_dir: cam_fwd,
+            auto_jump: 2.0,
             rng: Rng::new(11),
         }
     }
@@ -213,23 +213,23 @@ impl App {
     fn autopilot(&mut self, dt: f32) -> (V3, bool) {
         let n = self.player.n;
         let p = self.player.feet();
-        self.demo_dir = self.demo_dir.flatten(n).norm().rotate(n, (self.t * 0.35).sin() * dt);
-        let (dir, arrive, still) = match self.world().demo_target(p) {
+        self.auto_dir = self.auto_dir.flatten(n).norm().rotate(n, (self.t * 0.35).sin() * dt);
+        let (dir, arrive, still) = match self.world().autoplay_target(p) {
             Some((tp, a, still)) => ((tp - p).flatten(n), a, still),
-            None => (self.demo_dir, 0.0, false),
+            None => (self.auto_dir, 0.0, false),
         };
         let d = dir.len();
         let wish = if still && d < arrive {
             V3::ZERO
         } else if d < 0.05 {
-            self.demo_dir
+            self.auto_dir
         } else {
             dir.norm() * if still && d < arrive + 0.4 { 0.5 } else { 1.0 }
         };
-        self.demo_jump -= dt;
-        let jump = !still && self.demo_jump < 0.0;
-        if self.demo_jump < 0.0 {
-            self.demo_jump = self.rng.range(2.5, 5.0);
+        self.auto_jump -= dt;
+        let jump = !still && self.auto_jump < 0.0;
+        if self.auto_jump < 0.0 {
+            self.auto_jump = self.rng.range(2.5, 5.0);
         }
         (wish, jump)
     }
@@ -254,8 +254,8 @@ impl App {
         let mut input = !combo;
         if any {
             self.idle_t = 0.0;
-            if self.demo {
-                self.demo = false;
+            if self.autoplay {
+                self.autoplay = false;
                 input = false;
             }
         } else {
@@ -280,15 +280,15 @@ impl App {
             Mode::Title => {
                 if input && c.pressed(Button::A) {
                     self.start_play(self.cur);
-                } else if self.idle_t > IDLE_DEMO {
-                    self.demo = true;
+                } else if self.idle_t > IDLE_AUTOPLAY {
+                    self.autoplay = true;
                     self.start_play(self.cur);
                 }
             }
             Mode::Play => {
-                if self.demo {
+                if self.autoplay {
                     (wish, jump) = self.autopilot(dt);
-                    if self.planet_t > DEMO_STAY {
+                    if self.planet_t > AUTOPLAY_STAY {
                         self.begin_flight();
                     }
                 } else if input {
@@ -327,8 +327,8 @@ impl App {
             let want = self.player.vel.norm();
             // Follow the walking direction, but not right after the player
             // turned the camera by hand.
-            if self.demo || (want.dot(self.cam_fwd) > -0.2 && self.look_t > 1.5) {
-                let rate = if self.demo { 1.4 } else { 0.9 } * (sp / SPEED);
+            if self.autoplay || (want.dot(self.cam_fwd) > -0.2 && self.look_t > 1.5) {
+                let rate = if self.autoplay { 1.4 } else { 0.9 } * (sp / SPEED);
                 let angle = self.cam_fwd.cross(want).dot(n).atan2(self.cam_fwd.dot(want));
                 self.cam_fwd = self.cam_fwd.rotate(n, angle * (1.0 - (-rate * dt).exp())).norm();
             }
@@ -446,7 +446,7 @@ impl App {
             }
             Mode::Play => {
                 let rate = 1.6 + 4.4 * smooth(self.mode_t / 1.8);
-                let e = if self.demo { PITCH } else { self.cam_pitch };
+                let e = if self.autoplay { PITCH } else { self.cam_pitch };
                 let pivot = p + n * 0.3;
                 let mut pos = pivot + (n * e.sin() - f * e.cos()) * 2.3;
                 // Looking down from above, aim at the hero; looking up from

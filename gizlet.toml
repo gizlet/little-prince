@@ -1,4 +1,4 @@
-# The Little Prince demo's Gizlet app manifest. scripts/package.sh copies it
+# The Little Prince's Gizlet app manifest. scripts/package.sh copies it
 # to the root of the app folder, so the paths below are relative to that
 # folder. Keep version in step with Cargo.toml.
 id = "io.gizlet.littleprince"

@@ -1,6 +1,6 @@
 [package]
 name = "little-prince"
-description = "The Little Prince · 小王子: a 3D planet-walk demo for Gizlet OS in Rust + raylib."
+description = "The Little Prince · 小王子: a 3D planet-walk game for Gizlet OS in Rust + raylib."
 version = "0.2.0"
 edition = "2021"
 license = "MIT"

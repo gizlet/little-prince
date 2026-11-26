@@ -215,9 +215,9 @@ fn play(app: &App) {
     }
     f.text(&text, 632.0 - 10.0, 10.0 + (h - size * 1.2) / 2.0, size, CREAM, Align::Right);
 
-    if app.demo {
+    if app.autoplay {
         let a = 0.55 + 0.45 * (app.t * 2.5).sin();
-        f.shadowed(s(T::Demo, l), 632.0, 44.0, 11.0, rgba(CREAM, a), Align::Right, Weight::Text);
+        f.shadowed(s(T::Autoplay, l), 632.0, 44.0, 11.0, rgba(CREAM, a), Align::Right, Weight::Text);
     }
     if app.mode == Mode::Fly {
         let a = smooth(app.mode_t / 0.5) * (1.0 - smooth((app.mode_t - 3.2) / 0.6));
