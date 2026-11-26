@@ -1,17 +1,60 @@
 id = "io.gizlet.littleprince"
-version = "0.2.1"
+version = "0.2.2"
 name = "The Little Prince"
 category = "game"
-description = "Explore three tiny planets on foot and fly between them with migrating birds."
+description = "Walk three tiny planets, watch their suns set, and follow a flock of migrating birds to your next stop. A short 3D exploration demo for Gizlet handhelds."
+tags = ["exploration", "3d", "solo", "relaxing"]
+color = "#374978"
 license = "MIT"
 runtime = 1
 icon = "assets/icon.png"
+cover = "store/cover.jpg"
+screenshots = [
+    "docs/screenshots/b612.png",
+    "docs/screenshots/lamp.png",
+    "docs/screenshots/desert.png",
+    "docs/screenshots/fly.png",
+]
 
 [names]
 zh-CN = "小王子"
 
 [descriptions]
-zh-CN = "徒步探索三颗小小的星球，跟着候鸟飞向下一颗。"
+zh-CN = "徒步走过三颗小星球，看太阳落下，再跟着候鸟飞往下一站。一部为 Gizlet 掌机制作的短篇 3D 探索演示。"
+
+[about]
+en = "store/about.en.md"
+zh-CN = "store/about.zh-CN.md"
+
+[[controls]]
+button = "dpad"
+action = "Walk"
+actions = { zh-CN = "行走" }
+
+[[controls]]
+button = "a"
+action = "Jump"
+actions = { zh-CN = "跳跃" }
+
+[[controls]]
+button = "x"
+action = "Fly to the next planet"
+actions = { zh-CN = "飞往下一颗星球" }
+
+[[controls]]
+button = "l"
+action = "Turn the camera left"
+actions = { zh-CN = "向左转动镜头" }
+
+[[controls]]
+button = "r"
+action = "Turn the camera right"
+actions = { zh-CN = "向右转动镜头" }
+
+[[controls]]
+button = "start"
+action = "Switch language"
+actions = { zh-CN = "切换语言" }
 
 [[packages]]
 target = "aarch64-unknown-linux-gnu"

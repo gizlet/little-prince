@@ -17,6 +17,8 @@ if package["target"] != target:
 manifest = {"schema": 1}
 for key in ("id", "name", "names", "version", "description", "descriptions", "runtime"):
     manifest[key] = spec[key]
+if "color" in spec:
+    manifest["color"] = spec["color"]
 for key in ("target", "tier", "entry"):
     manifest[key] = package[key]
 manifest["icon"] = "icon.png"
