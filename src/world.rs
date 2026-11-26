@@ -628,8 +628,8 @@ impl World {
         };
         let spawn = V3::Y;
         let r = move |n: V3| ground_r(kind, n);
-        let ground = mesh::planet(6, &r, &|n, h| ground_colour(kind, n, h));
-        let coarse_ground = mesh::planet(4, &r, &|n, h| ground_colour(kind, n, h));
+        let ground = mesh::planet(mesh::GROUND_SUBDIV, &r, &|n, h| ground_colour(kind, n, h));
+        let coarse_ground = mesh::planet(mesh::COARSE_SUBDIV, &r, &|n, h| ground_colour(kind, n, h));
         let mut grass;
         let mut stars: Vec<Star> = (0..360)
             .map(|_| Star { d: rng.dir(), size: rng.range(0.12, 0.42), phase: rng.range(0.0, TAU), col: rgb(0xE8EEFF) })

@@ -363,8 +363,14 @@ pub fn icosphere(n: u32) -> Vec<[V3; 3]> {
     faces
 }
 
+/// How finely a planet's ground is built near the camera, and for groups of
+/// cells far away.
+pub const GROUND_SUBDIV: u32 = 6;
+pub const COARSE_SUBDIV: u32 = 4;
+
 /// A planet's ground: the unit sphere pushed out to `height`, smooth-shaded,
-/// coloured per vertex by `colour(direction, height)` (colour, glow).
+/// coloured per vertex by `colour(direction, height)` (colour, glow). Its
+/// triangles come in the order of `icosphere(subdiv)`'s faces.
 pub fn planet(subdiv: u32, height: &dyn Fn(V3) -> f32, colour: &dyn Fn(V3, f32) -> (Color, f32)) -> Builder {
     let normal = |u: V3| {
         let t1 = any_perp(u);
@@ -654,7 +660,9 @@ impl CellFinder {
         let candidates =
             coarse.iter().map(|c| (0..cells.len()).filter(|&i| cells[i].dot(*c) >= limit).collect()).collect();
         let mut finder = CellFinder { coarse, candidates, cells, parent: Vec::new() };
-        finder.parent = finder.cells.iter().map(|&c| finder.nearest_coarse(c)).collect();
+        // Each face of `icosphere(2)` is one of the four `icosphere(1)` splits
+        // its parent into, in order.
+        finder.parent = (0..finder.cells.len()).map(|j| j / 4).collect();
         finder
     }
 
@@ -682,14 +690,16 @@ impl Builder {
         parts
     }
 
-    /// Splits the (unindexed) triangles by the group of cells their centre
-    /// lies in; always one builder per group.
-    fn groups(self, finder: &CellFinder) -> Vec<Builder> {
-        let mut parts: Vec<Builder> = vec![Builder::default(); finder.coarse.len()];
-        let at = |v: usize| v3(self.pos[v * 3], self.pos[v * 3 + 1], self.pos[v * 3 + 2]);
+    /// Splits ground made by `planet(subdiv, ..)` by the face of
+    /// `icosphere(level)` each triangle lies in: `icosphere` splits every
+    /// face into four in order, so triangle `t` lies in face
+    /// `t >> 2 * (subdiv - level)`. Ground of any subdivision split this way
+    /// has exactly the same boundaries.
+    fn by_face(self, subdiv: u32, level: u32) -> Vec<Builder> {
+        let shift = 2 * (subdiv - level);
+        let mut parts: Vec<Builder> = vec![Builder::default(); 20 << (2 * level)];
         for t in 0..self.pos.len() / 9 {
-            let c = (at(t * 3) + at(t * 3 + 1) + at(t * 3 + 2)).norm();
-            parts[finder.nearest_coarse(c)].append_vertices(&self, t * 3, 3);
+            parts[t >> shift].append_vertices(&self, t * 3, 3);
         }
         parts
     }
@@ -777,13 +787,18 @@ pub fn tiles(
     layers: TileLayers,
 ) -> (Vec<Tile>, Vec<Group>) {
     let finder = CellFinder::new();
-    let coarse_ground = coarse_ground.groups(&finder);
-    let mut cells = [ground, props, props_lo, flowers, grass].map(|layer| layer.cells(&finder).into_iter());
+    // The ground splits along the faces it was built from, at both levels of
+    // detail, so a group drawn coarse covers exactly the cells it replaces.
+    let coarse_ground = coarse_ground.by_face(COARSE_SUBDIV, 1);
+    let ground = ground.by_face(GROUND_SUBDIV, 2);
+    let mut cells = [props, props_lo, flowers, grass].map(|layer| layer.cells(&finder).into_iter());
+    let mut ground = ground.into_iter();
     let mut out = Vec::with_capacity(finder.cells.len());
     let mut group_ground = vec![Builder::default(); finder.coarse.len()];
     let mut group_scenery = vec![Builder::default(); finder.coarse.len()];
     for (i, &dir) in finder.cells.iter().enumerate() {
-        let [g, p, l, d, s] = cells.each_mut().map(|layer| layer.next().unwrap());
+        let g = ground.next().unwrap_or_default();
+        let [p, l, d, s] = cells.each_mut().map(|layer| layer.next().unwrap());
         if g.pos.is_empty() && p.pos.is_empty() && d.pos.is_empty() && s.pos.is_empty() {
             continue;
         }
@@ -989,6 +1004,49 @@ mod tests {
                 .unwrap();
             assert_eq!(finder.cells[finder.nearest(p)].dot(p), finder.cells[best].dot(p));
         }
+    }
+
+    /// Whether `p` lies in the spherical triangle `f`, give or take `eps`.
+    fn inside(f: &[V3; 3], p: V3, eps: f32) -> bool {
+        (0..3).all(|k| {
+            let (a, b, c) = (f[k], f[(k + 1) % 3], f[(k + 2) % 3]);
+            let n = a.cross(b);
+            n.dot(p) * n.dot(c).signum() >= -eps
+        })
+    }
+
+    #[test]
+    fn coarse_and_fine_ground_split_along_the_same_boundaries() {
+        // Every fine triangle lies in the coarse triangle `by_face` takes it
+        // for, so a group covers the same ground at either level of detail.
+        let coarse = icosphere(COARSE_SUBDIV);
+        let fine = icosphere(GROUND_SUBDIV);
+        let shift = 2 * (GROUND_SUBDIV - COARSE_SUBDIV);
+        for (i, f) in fine.iter().enumerate() {
+            let outer = &coarse[i >> shift];
+            assert!(f.iter().all(|&v| inside(outer, v, 1e-4)), "fine face {i}");
+        }
+        // And every cell lies in its group.
+        let (groups, cells) = (icosphere(1), icosphere(2));
+        let finder = CellFinder::new();
+        for (j, f) in cells.iter().enumerate() {
+            assert!(f.iter().all(|&v| inside(&groups[finder.parent[j]], v, 1e-4)), "cell {j}");
+        }
+        // The cells' and groups' directions are those faces' centres.
+        for (j, f) in cells.iter().enumerate() {
+            assert!(inside(f, finder.cells[j], 0.0));
+        }
+    }
+
+    #[test]
+    fn ground_splits_into_cells_and_groups_by_face() {
+        let ground = planet(GROUND_SUBDIV, &|_| 10.0, &|_, _| (crate::gl::rgb(0x808080), 0.0));
+        let n = ground.pos.len();
+        let cells = ground.clone().by_face(GROUND_SUBDIV, 2);
+        assert_eq!(cells.len(), 320);
+        assert!(cells.iter().all(|c| c.pos.len() == n / 320));
+        let groups = ground.by_face(GROUND_SUBDIV, 1);
+        assert_eq!(groups.len(), 80);
     }
 
     #[test]
