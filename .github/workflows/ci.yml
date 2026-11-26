@@ -100,8 +100,9 @@ jobs:
   release:
     needs: package
     if: >-
-      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag'))
-      || (github.event_name == 'workflow_dispatch' && github.ref_type == 'tag' && inputs.pull_request_number == '')
+      !cancelled() && needs.package.result == 'success' && (
+        (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag'))
+        || (github.event_name == 'workflow_dispatch' && github.ref_type == 'tag' && inputs.pull_request_number == ''))
     permissions:
       contents: write
       id-token: write
