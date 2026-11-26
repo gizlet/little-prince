@@ -213,12 +213,12 @@ impl Device {
         }
         for (slot, code) in [ABS_X, ABS_Y, ABS_RX, ABS_RY].into_iter().enumerate() {
             if self.has_abs[code] {
-                pad.axes[slot] = self.abs[code].centered();
+                pad.merge_axis(slot, self.abs[code].centered());
             }
         }
         for (slot, code) in [(4, ABS_Z), (5, ABS_RZ)] {
             if self.has_abs[code] {
-                pad.axes[slot] = self.abs[code].ranged();
+                pad.merge_axis(slot, self.abs[code].ranged());
             }
         }
     }

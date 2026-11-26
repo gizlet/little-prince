@@ -49,6 +49,14 @@ impl RawPad {
     pub fn set(&mut self, b: Button) {
         self.buttons[b as usize] = true;
     }
+
+    /// Keeps the strongest deflection reported for this axis.
+    pub fn merge_axis(&mut self, slot: usize, value: f32) {
+        let axis = &mut self.axes[slot];
+        if value.abs() > axis.abs() {
+            *axis = value;
+        }
+    }
 }
 
 const KEYS: [(K, Button); 18] = [
@@ -172,20 +180,12 @@ impl Controls {
                     }
                     let x = ffi::GetGamepadAxisMovement(g, Axis::GAMEPAD_AXIS_LEFT_X as i32);
                     let y = ffi::GetGamepadAxisMovement(g, Axis::GAMEPAD_AXIS_LEFT_Y as i32);
-                    if x.abs() > pad.axes[0].abs() {
-                        pad.axes[0] = x;
-                    }
-                    if y.abs() > pad.axes[1].abs() {
-                        pad.axes[1] = y;
-                    }
+                    pad.merge_axis(0, x);
+                    pad.merge_axis(1, y);
                     let rx = ffi::GetGamepadAxisMovement(g, Axis::GAMEPAD_AXIS_RIGHT_X as i32);
                     let ry = ffi::GetGamepadAxisMovement(g, Axis::GAMEPAD_AXIS_RIGHT_Y as i32);
-                    if rx.abs() > pad.axes[2].abs() {
-                        pad.axes[2] = rx;
-                    }
-                    if ry.abs() > pad.axes[3].abs() {
-                        pad.axes[3] = ry;
-                    }
+                    pad.merge_axis(2, rx);
+                    pad.merge_axis(3, ry);
                 }
             }
         }
@@ -296,7 +296,25 @@ impl Controls {
 
 #[cfg(test)]
 mod tests {
-    use super::{repeat, walking_stick};
+    use super::{repeat, walking_stick, RawPad};
+
+    #[test]
+    fn idle_controller_preserves_active_sticks_and_triggers() {
+        let active = [-0.7, 0.2, -0.9, 0.6, 0.5, 1.0];
+        for active_first in [true, false] {
+            let mut pad = RawPad::default();
+            let idle = [0.0; 6];
+            let controllers = if active_first { [active, idle] } else { [idle, active] };
+            for axes in controllers {
+                for (slot, value) in axes.into_iter().enumerate() {
+                    pad.merge_axis(slot, value);
+                }
+            }
+            assert_eq!(pad.axes, active);
+            pad.merge_axis(1, -0.4);
+            assert_eq!(pad.axes[1], -0.4);
+        }
+    }
 
     #[test]
     fn walking_stick_caps_diagonal_speed() {

@@ -350,6 +350,107 @@ struct Fox {
     heart_t: f32,
 }
 
+impl Fox {
+    fn new(spawn: V3) -> Self {
+        let n = spot(0.56, 0.14);
+        Self {
+            n,
+            face: (spawn - n).flatten(n).norm(),
+            trust: 0,
+            still: 0.0,
+            phase: 0.0,
+            speed: 0.0,
+            sit: 1.0,
+            wag: 0.0,
+            heart_t: 0.0,
+        }
+    }
+
+    fn preferred_distance(trust: usize) -> f32 {
+        2.4 - trust as f32 * 0.28
+    }
+
+    /// Advances the fox and returns whether it gained a point of trust.
+    fn update(&mut self, dt: f32, p: &PState, fx: &mut Fx, snd: &mut Sounds) -> bool {
+        let mut scored = false;
+        let r = ground_r(Kind::Desert, self.n);
+        let pos = self.n * r;
+        let to_p = (p.feet - pos).flatten(self.n);
+        let d = (p.feet - pos).len();
+        let moving = p.speed > 0.35;
+        let mut target: Option<(V3, f32)> = None;
+        if self.trust < FOX_TRUST {
+            let keep = Self::preferred_distance(self.trust);
+            if d < keep - 0.3 {
+                target = Some((pos - to_p.norm(), if moving { 1.8 } else { 0.9 }));
+                self.still = 0.0;
+            } else if !moving && d < keep + 0.9 {
+                self.still += dt;
+                if self.still > 2.4 {
+                    self.still = 0.0;
+                    self.trust += 1;
+                    scored = true;
+                    fx.burst(pos + self.n * 0.35, self.n, Burst {
+                        n: 10,
+                        speed: (0.2, 0.5),
+                        size: (0.04, 0.07),
+                        life: (1.0, 1.6),
+                        cols: &[rgb(0xFF8FA6), rgb(0xFFC2D0)],
+                        glow: true,
+                        grav: -0.25,
+                        drag: 1.2,
+                        aim: 0.8,
+                    });
+                    snd.play(Sfx::Chime(self.trust + 1), 1.0, 0.45);
+                    if self.trust == FOX_TRUST {
+                        fx.ring(pos, self.n, 1.2, 1.0, rgb(0xFFC15E));
+                        snd.play(Sfx::Chime(7), 1.0, 0.5);
+                    }
+                }
+            } else {
+                self.still = (self.still - dt).max(0.0);
+            }
+            // Close the gap as trust grows while the prince waits.
+            if d > keep && (!moving || d > keep + 1.8) {
+                target = Some((p.feet, ((d - keep) * 2.0).min(0.8)));
+            }
+        } else {
+            let right = p.feet.norm().cross(p.face);
+            let spot = p.feet - p.face * 0.55 + right * 0.4;
+            if (spot - pos).len() > 0.25 {
+                target = Some((spot, (((spot - pos).len() - 0.1) * 3.0).min(2.6)));
+            }
+            self.heart_t -= dt;
+            if self.heart_t < 0.0 {
+                self.heart_t = 2.5;
+                let mut h = Particle::new(pos + self.n * 0.35, self.n * 0.25, 1.2, 0.05, rgb(0xFF8FA6), true);
+                h.drag = 1.0;
+                fx.spawn(h);
+            }
+        }
+        match target {
+            Some((tp, speed)) => {
+                let dir = (tp - pos).flatten(self.n).norm();
+                self.speed = approach(self.speed, speed, 6.0, dt);
+                let ang = self.speed * dt / r;
+                self.n = self.n.rotate(self.n.cross(dir).norm(), ang).norm();
+                self.face = crate::math::approach3(self.face, dir, 8.0, dt).flatten(self.n).norm();
+                self.sit = approach(self.sit, 0.0, 8.0, dt);
+            }
+            None => {
+                self.speed = approach(self.speed, 0.0, 8.0, dt);
+                let look = to_p.norm();
+                self.face = crate::math::approach3(self.face, look, 3.0, dt).flatten(self.n).norm();
+                self.sit = approach(self.sit, 1.0, 3.0, dt);
+            }
+        }
+        self.phase += self.speed * dt * 13.0;
+        let wag = if self.trust >= FOX_TRUST { 10.0 } else { 2.5 + self.trust as f32 };
+        self.wag += dt * wag;
+        scored
+    }
+}
+
 struct Star {
     d: V3,
     size: f32,
@@ -643,19 +744,9 @@ impl World {
                     mesh::ellipsoid(&mut props, f.at(v3(x, -0.1, 0.2)), ax(v3(0.02, 0.06, 0.06)), 1, &|_| rgb(0x3B3340), &no_sway, true);
                 }
                 w.prop = Some(f.moved(v3(0.0, 0.08, 0.6)));
-                let fox_n = spot(0.56, 0.14);
-                taken.push(fox_n);
-                w.fox = Some(Fox {
-                    n: fox_n,
-                    face: (spawn - fox_n).flatten(fox_n).norm(),
-                    trust: 0,
-                    still: 0.0,
-                    phase: 0.0,
-                    speed: 0.0,
-                    sit: 1.0,
-                    wag: 0.0,
-                    heart_t: 0.0,
-                });
+                let fox = Fox::new(spawn);
+                taken.push(fox.n);
+                w.fox = Some(fox);
                 let wheat = spot(0.1, 0.3);
                 for n in scatter(&mut rng, 12, 0.12, &mut taken, &|d| d.dot(wheat) < 0.96) {
                     rock(&mut props, n, r(n), rgb(0xB9937A), 0.12, &mut rng);
@@ -733,11 +824,6 @@ impl World {
         self.lamp.as_ref().filter(|l| l.on > 0.01).map(|l| (l.head, l.on))
     }
 
-    /// How close the fox lets the prince come now.
-    fn fox_distance(trust: usize) -> f32 {
-        2.4 - trust as f32 * 0.28
-    }
-
     /// Where autoplay should walk: a point, how near to stop, and whether
     /// to stand still once there.
     pub fn autoplay_target(&self, from: V3) -> Option<(V3, f32, bool)> {
@@ -753,7 +839,7 @@ impl World {
             Kind::Lamp => None,
             Kind::Desert => self.fox.as_ref().filter(|f| f.trust < FOX_TRUST).map(|f| {
                 let r = ground_r(self.kind, f.n);
-                (f.n * r, World::fox_distance(f.trust) + 0.35, true)
+                (f.n * r, Fox::preferred_distance(f.trust) + 0.35, true)
             }),
         }
     }
@@ -908,79 +994,7 @@ impl World {
             }
             Kind::Desert => {
                 if let Some(fox) = &mut self.fox {
-                    let r = ground_r(Kind::Desert, fox.n);
-                    let pos = fox.n * r;
-                    let to_p = (p.feet - pos).flatten(fox.n);
-                    let d = (p.feet - pos).len();
-                    let moving = p.speed > 0.35;
-                    let mut target: Option<(V3, f32)> = None;
-                    if fox.trust < FOX_TRUST {
-                        let keep = World::fox_distance(fox.trust);
-                        if d < keep - 0.3 {
-                            target = Some((pos - to_p.norm(), if moving { 1.8 } else { 0.9 }));
-                            fox.still = 0.0;
-                        } else if !moving && d < keep + 0.9 {
-                            fox.still += dt;
-                            if fox.still > 2.4 {
-                                fox.still = 0.0;
-                                fox.trust += 1;
-                                scored = true;
-                                fx.burst(pos + fox.n * 0.35, fox.n, Burst {
-                                    n: 10,
-                                    speed: (0.2, 0.5),
-                                    size: (0.04, 0.07),
-                                    life: (1.0, 1.6),
-                                    cols: &[rgb(0xFF8FA6), rgb(0xFFC2D0)],
-                                    glow: true,
-                                    grav: -0.25,
-                                    drag: 1.2,
-                                    aim: 0.8,
-                                });
-                                snd.play(Sfx::Chime(fox.trust + 1), 1.0, 0.45);
-                                if fox.trust == FOX_TRUST {
-                                    fx.ring(pos, fox.n, 1.2, 1.0, rgb(0xFFC15E));
-                                    snd.play(Sfx::Chime(7), 1.0, 0.5);
-                                }
-                            }
-                        } else {
-                            fox.still = (fox.still - dt).max(0.0);
-                        }
-                        if d > keep + 1.8 {
-                            target = Some((p.feet, 0.8));
-                        }
-                    } else {
-                        let right = up.cross(p.face);
-                        let spot = p.feet - p.face * 0.55 + right * 0.4;
-                        if (spot - pos).len() > 0.25 {
-                            target = Some((spot, (((spot - pos).len() - 0.1) * 3.0).min(2.6)));
-                        }
-                        fox.heart_t -= dt;
-                        if fox.heart_t < 0.0 {
-                            fox.heart_t = 2.5;
-                            let mut h = Particle::new(pos + fox.n * 0.35, fox.n * 0.25, 1.2, 0.05, rgb(0xFF8FA6), true);
-                            h.drag = 1.0;
-                            fx.spawn(h);
-                        }
-                    }
-                    match target {
-                        Some((tp, speed)) => {
-                            let dir = (tp - pos).flatten(fox.n).norm();
-                            fox.speed = approach(fox.speed, speed, 6.0, dt);
-                            let ang = fox.speed * dt / r;
-                            fox.n = fox.n.rotate(fox.n.cross(dir).norm(), ang).norm();
-                            fox.face = crate::math::approach3(fox.face, dir, 8.0, dt).flatten(fox.n).norm();
-                            fox.sit = approach(fox.sit, 0.0, 8.0, dt);
-                        }
-                        None => {
-                            fox.speed = approach(fox.speed, 0.0, 8.0, dt);
-                            let look = to_p.norm();
-                            fox.face = crate::math::approach3(fox.face, look, 3.0, dt).flatten(fox.n).norm();
-                            fox.sit = approach(fox.sit, 1.0, 3.0, dt);
-                        }
-                    }
-                    fox.phase += fox.speed * dt * 13.0;
-                    let wag = if fox.trust >= FOX_TRUST { 10.0 } else { 2.5 + fox.trust as f32 };
-                    fox.wag += dt * wag;
+                    scored |= fox.update(dt, p, fx, snd);
                 }
             }
         }
@@ -1349,7 +1363,20 @@ mod tests {
 
     #[test]
     fn the_fox_comes_closer_as_it_trusts() {
-        assert!(World::fox_distance(4) < World::fox_distance(0));
-        assert!(World::fox_distance(FOX_TRUST) > 0.8);
+        assert!(Fox::preferred_distance(4) < Fox::preferred_distance(0));
+        assert!(Fox::preferred_distance(FOX_TRUST) > 0.8);
+    }
+
+    #[test]
+    fn the_fox_reaches_full_trust_while_the_player_waits_at_spawn() {
+        let spawn = V3::Y;
+        let player = PState { feet: spawn * ground_r(Kind::Desert, spawn), face: any_perp(spawn), speed: 0.0 };
+        let mut fox = Fox::new(spawn);
+        let mut fx = Fx::new();
+        let mut snd = Sounds::new(false);
+        for _ in 0..(20 * 60) {
+            fox.update(1.0 / 60.0, &player, &mut fx, &mut snd);
+        }
+        assert_eq!(fox.trust, FOX_TRUST);
     }
 }
