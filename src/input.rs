@@ -103,6 +103,17 @@ fn repeat(held: f32, down: bool, dt: f32) -> (f32, bool) {
     (now, fires)
 }
 
+/// Applies the walking dead zone and caps speed at full stick deflection.
+fn walking_stick(x: f32, y: f32) -> (f32, f32) {
+    let magnitude = x.hypot(y);
+    if magnitude > 0.22 {
+        let scale = magnitude.max(1.0);
+        (x / scale, y / scale)
+    } else {
+        (0.0, 0.0)
+    }
+}
+
 pub struct Controls {
     cur: [bool; BUTTONS],
     prev: [bool; BUTTONS],
@@ -182,7 +193,7 @@ impl Controls {
             pad.buttons.swap(Button::A as usize, Button::B as usize);
         }
         let (x, y) = (pad.axes[0], pad.axes[1]);
-        self.stick = if x.hypot(y) > 0.22 { (x, y) } else { (0.0, 0.0) };
+        self.stick = walking_stick(x, y);
         // The right stick turns the camera; past the dead zone it ramps up
         // from zero so small pushes give fine control.
         let (rx, ry) = (pad.axes[2], pad.axes[3]);
@@ -285,7 +296,18 @@ impl Controls {
 
 #[cfg(test)]
 mod tests {
-    use super::repeat;
+    use super::{repeat, walking_stick};
+
+    #[test]
+    fn walking_stick_caps_diagonal_speed() {
+        let (x, y) = walking_stick(1.0, -1.0);
+        assert!((x.hypot(y) - 1.0).abs() < 1e-6);
+        assert_eq!(x, -y);
+        assert!(x > 0.0);
+        assert_eq!(walking_stick(1.0, 0.0), (1.0, 0.0));
+        assert_eq!(walking_stick(0.3, -0.4), (0.3, -0.4));
+        assert_eq!(walking_stick(0.1, 0.1), (0.0, 0.0));
+    }
 
     /// Counts repeats over `frames` held frames, then one released frame.
     fn run(frames: usize) -> (usize, bool) {
