@@ -102,8 +102,16 @@ To afford planets four to eight times the area:
   near level adds the scenery, flowers and every other blade of grass, the
   close level the rest of the grass; the middle level adds coarse scenery with
   its own index list.
-- Four neighbouring cells that are all far away are drawn as one mesh, so a
-  view from high above does not cost one draw call per cell.
+- Four neighbouring cells that are all more than 9 units away are drawn as
+  one mesh, so a view from high above or over hills does not cost one draw
+  call per cell. Beyond 10 units a group carries only its ground, built
+  four times coarser (subdivision 4 instead of 6) with a short skirt hanging
+  from its open edges to hide slivers where it meets finer ground. The title
+  stretches these distances by 1.6, so its trees stay in view.
+- Cells below the horizon are skipped. Each of 16 directions round the camera
+  keeps the lowest ground within reach, and a cell is hidden only when a
+  sphere that size would hide it: valleys never hide visible ground, and a
+  valley behind the camera does not widen the view ahead.
 - The sky backdrop and stars are drawn just beyond the farthest ground the
   camera can see, and no nearer than 26 units, so they never cover the planet
   while keeping the 16-bit depth buffer precise.

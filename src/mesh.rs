@@ -508,12 +508,49 @@ pub fn grass(
     size: (f32, f32),
     palette: &[Color],
 ) -> Builder {
+    grass_from(rng, count, &mut |rng| rng.dir(), height, keep, size, palette)
+}
+
+/// Blades of grass like `grass`, only within `area` (a direction and an
+/// angle round it), so a small field fills up without sampling the whole
+/// planet.
+pub fn grass_in(
+    rng: &mut Rng,
+    count: usize,
+    area: (V3, f32),
+    height: &dyn Fn(V3) -> f32,
+    keep: &dyn Fn(V3) -> bool,
+    size: (f32, f32),
+    palette: &[Color],
+) -> Builder {
+    let (centre, ang) = area;
+    let (t1, t2) = (any_perp(centre), centre.cross(any_perp(centre)));
+    let lo = ang.cos();
+    let mut sample = |rng: &mut Rng| {
+        // Uniform over the spherical cap: uniform in height along `centre`.
+        let z = rng.range(lo, 1.0);
+        let a = rng.range(0.0, TAU);
+        let r = (1.0 - z * z).max(0.0).sqrt();
+        (centre * z + (t1 * a.cos() + t2 * a.sin()) * r).norm()
+    };
+    grass_from(rng, count, &mut sample, height, keep, size, palette)
+}
+
+fn grass_from(
+    rng: &mut Rng,
+    count: usize,
+    sample: &mut dyn FnMut(&mut Rng) -> V3,
+    height: &dyn Fn(V3) -> f32,
+    keep: &dyn Fn(V3) -> bool,
+    size: (f32, f32),
+    palette: &[Color],
+) -> Builder {
     let mut b = Builder::default();
     let mut placed = 0;
     let mut tries = 0;
     while placed < count && tries < count * 40 {
         tries += 1;
-        let c = rng.dir();
+        let c = sample(rng);
         if !keep(c) {
             continue;
         }
@@ -564,6 +601,8 @@ pub struct Tile {
     pub ang: f32,
     /// The distance from the planet's centre to the cell's highest vertex.
     pub top: f32,
+    /// The distance from the planet's centre to the cell's lowest ground.
+    pub low: f32,
     /// The `Group` this cell is one of.
     pub group: usize,
     pub close: Mesh,
@@ -572,10 +611,12 @@ pub struct Tile {
     pub far: Mesh,
 }
 
-/// Four neighbouring cells' ground in one mesh, drawn instead of the four
-/// when they are all far away: from high above, half the planet's cells
-/// are in view and each would be a draw call of its own.
+/// Four neighbouring cells in one mesh, drawn instead of the four when they
+/// are all some way off: from high above or over hills, many cells are in
+/// view and each would be a draw call of its own. `mid` has the ground and
+/// the coarser scenery, `far` the ground alone.
 pub struct Group {
+    pub mid: Mesh,
     pub far: Mesh,
 }
 
@@ -641,6 +682,58 @@ impl Builder {
         parts
     }
 
+    /// Splits the (unindexed) triangles by the group of cells their centre
+    /// lies in; always one builder per group.
+    fn groups(self, finder: &CellFinder) -> Vec<Builder> {
+        let mut parts: Vec<Builder> = vec![Builder::default(); finder.coarse.len()];
+        let at = |v: usize| v3(self.pos[v * 3], self.pos[v * 3 + 1], self.pos[v * 3 + 2]);
+        for t in 0..self.pos.len() / 9 {
+            let c = (at(t * 3) + at(t * 3 + 1) + at(t * 3 + 2)).norm();
+            parts[finder.nearest_coarse(c)].append_vertices(&self, t * 3, 3);
+        }
+        parts
+    }
+
+    /// Adds a strip hanging `depth` towards the centre from every open edge
+    /// of these (unindexed) triangles, seen from both sides: it fills the
+    /// slivers where this coarser ground meets finer ground next to it.
+    fn with_skirt(mut self, depth: f32) -> Builder {
+        let key = |v: usize| [self.pos[v * 3].to_bits(), self.pos[v * 3 + 1].to_bits(), self.pos[v * 3 + 2].to_bits()];
+        // Each edge by its two corners: its first two vertices and how many
+        // triangles share it.
+        type Corner = [u32; 3];
+        let mut edges: std::collections::HashMap<(Corner, Corner), (usize, usize, u32)> = Default::default();
+        for t in 0..self.pos.len() / 9 {
+            for (a, b) in [(0, 1), (1, 2), (2, 0)] {
+                let (a, b) = (t * 3 + a, t * 3 + b);
+                let (ka, kb) = (key(a), key(b));
+                let k = if ka < kb { (ka, kb) } else { (kb, ka) };
+                edges.entry(k).or_insert((a, b, 0)).2 += 1;
+            }
+        }
+        let mut open: Vec<(usize, usize)> = edges.into_values().filter(|e| e.2 == 1).map(|e| (e.0, e.1)).collect();
+        open.sort_unstable();
+        let vertex = |b: &Builder, v: usize| {
+            let p = v3(b.pos[v * 3], b.pos[v * 3 + 1], b.pos[v * 3 + 2]);
+            let n = v3(b.nrm[v * 3], b.nrm[v * 3 + 1], b.nrm[v * 3 + 2]);
+            let c = Color { r: b.col[v * 4], g: b.col[v * 4 + 1], b: b.col[v * 4 + 2], a: b.col[v * 4 + 3] };
+            (p, n, (b.uv[v * 2], b.uv[v * 2 + 1]), c)
+        };
+        for (a, b) in open {
+            let (pa, na, ua, ca) = vertex(&self, a);
+            let (pb, nb, ub, cb) = vertex(&self, b);
+            let (la, lb) = (pa - pa.norm() * depth, pb - pb.norm() * depth);
+            for quad in [[(pa, na, ua, ca), (pb, nb, ub, cb), (lb, nb, ub, cb), (la, na, ua, ca)]] {
+                for [i, j, k] in [[0, 1, 2], [0, 2, 3], [0, 2, 1], [0, 3, 2]] {
+                    for v in [quad[i], quad[j], quad[k]] {
+                        self.push(v.0, v.1, v.2, v.3);
+                    }
+                }
+            }
+        }
+        self
+    }
+
     /// Splits double-sided grass blades (12 vertices each) into every other
     /// blade and the rest, so the thinned half can be drawn on its own.
     fn split_grass(&self) -> (Builder, Builder) {
@@ -676,11 +769,19 @@ pub struct TileLayers {
 }
 
 /// Builds the planet's tiles from unindexed layers in world space.
-pub fn tiles([ground, props, props_lo, flowers, grass]: [Builder; 5], layers: TileLayers) -> (Vec<Tile>, Vec<Group>) {
+/// `coarse_ground` is the same ground built coarser, for groups of cells far
+/// away.
+pub fn tiles(
+    [ground, props, props_lo, flowers, grass]: [Builder; 5],
+    coarse_ground: Builder,
+    layers: TileLayers,
+) -> (Vec<Tile>, Vec<Group>) {
     let finder = CellFinder::new();
+    let coarse_ground = coarse_ground.groups(&finder);
     let mut cells = [ground, props, props_lo, flowers, grass].map(|layer| layer.cells(&finder).into_iter());
     let mut out = Vec::with_capacity(finder.cells.len());
     let mut group_ground = vec![Builder::default(); finder.coarse.len()];
+    let mut group_scenery = vec![Builder::default(); finder.coarse.len()];
     for (i, &dir) in finder.cells.iter().enumerate() {
         let [g, p, l, d, s] = cells.each_mut().map(|layer| layer.next().unwrap());
         if g.pos.is_empty() && p.pos.is_empty() && d.pos.is_empty() && s.pos.is_empty() {
@@ -688,6 +789,9 @@ pub fn tiles([ground, props, props_lo, flowers, grass]: [Builder; 5], layers: Ti
         }
         let group = finder.parent[i];
         group_ground[group].append(&g);
+        if layers.props {
+            group_scenery[group].append(&l);
+        }
         let ang = [&g, &p, &d, &s]
             .iter()
             .flat_map(|b| b.pos.chunks(3))
@@ -698,6 +802,7 @@ pub fn tiles([ground, props, props_lo, flowers, grass]: [Builder; 5], layers: Ti
             .flat_map(|b| b.pos.chunks(3))
             .map(|q| v3(q[0], q[1], q[2]).len())
             .fold(0.0, f32::max);
+        let low = g.pos.chunks(3).map(|q| v3(q[0], q[1], q[2]).len()).fold(top, f32::min);
         let (grass, grass_rest) = if layers.grass { s.split_grass() } else { Default::default() };
         // One set of vertices per cell, in the order the levels add them, so
         // each level is a range of its triangles: far is the ground, mid
@@ -737,17 +842,23 @@ pub fn tiles([ground, props, props_lo, flowers, grass]: [Builder; 5], layers: Ti
         let all = all.indexed();
         if all.idx.is_empty() {
             // Over 65,535 vertices: too many for one set of 16-bit indices.
-            out.push(tile_from_levels(dir, ang, top, group, layers_in_order, layers));
+            out.push(tile_from_levels(dir, (ang, top, low), group, layers_in_order, layers));
             continue;
         }
         let mid = (coarse > 0).then(|| [&all.idx[..ranges[0] * 3], &all.idx[ranges[3] * 3..ranges[4] * 3]].concat());
         let meshes = all.upload_cell([ranges[0], ranges[2], ranges[3]], mid.as_deref());
-        out.push(Tile { dir, ang, top, group, far: meshes[0], mid: meshes[1], near: meshes[2], close: meshes[3] });
+        out.push(Tile { dir, ang, top, low, group, far: meshes[0], mid: meshes[1], near: meshes[2], close: meshes[3] });
     }
+    let upload =
+        |b: Builder| if b.pos.is_empty() { unsafe { std::mem::zeroed() } } else { b.indexed().upload_static() };
     let groups = group_ground
         .into_iter()
-        .map(|g| Group {
-            far: if g.pos.is_empty() { unsafe { std::mem::zeroed() } } else { g.indexed().upload_static() },
+        .zip(group_scenery)
+        .zip(coarse_ground)
+        .map(|((g, l), c)| {
+            let mut mid = g;
+            mid.append(&l);
+            Group { mid: upload(mid), far: upload(c.with_skirt(0.6)) }
         })
         .collect();
     (out, groups)
@@ -756,7 +867,13 @@ pub fn tiles([ground, props, props_lo, flowers, grass]: [Builder; 5], layers: Ti
 /// A cell built as separate meshes, one per level, for when its vertices
 /// do not fit one set of 16-bit indices. `layers` are in the order `tiles`
 /// collects them.
-fn tile_from_levels(dir: V3, ang: f32, top: f32, group: usize, mut layers: Vec<Builder>, on: TileLayers) -> Tile {
+fn tile_from_levels(
+    dir: V3,
+    (ang, top, low): (f32, f32, f32),
+    group: usize,
+    mut layers: Vec<Builder>,
+    on: TileLayers,
+) -> Tile {
     let coarse = if on.props { layers.pop() } else { None };
     let rest = layers.pop().unwrap_or_default();
     let half = layers.pop().unwrap_or_default();
@@ -773,7 +890,7 @@ fn tile_from_levels(dir: V3, ang: f32, top: f32, group: usize, mut layers: Vec<B
     let mut close = near.clone();
     close.append(&rest);
     let up = |b: Builder| b.indexed().upload_static();
-    Tile { dir, ang, top, group, far: up(far), mid: up(mid), near: up(near), close: up(close) }
+    Tile { dir, ang, top, low, group, far: up(far), mid: up(mid), near: up(near), close: up(close) }
 }
 
 /// White unit shapes, coloured and placed at draw time.
@@ -880,6 +997,31 @@ mod tests {
         for g in 0..finder.coarse.len() {
             assert_eq!(finder.parent.iter().filter(|&&p| p == g).count(), 4, "group {g}");
         }
+    }
+
+    #[test]
+    fn a_small_field_fills_up_with_all_its_blades() {
+        let mut rng = Rng::new(9);
+        let centre = V3::Y;
+        let ang = 1.6 / 25.0;
+        let b = grass_in(&mut rng, 3500, (centre, ang), &|_| 25.0, &|_| true, (0.1, 0.2), &[crate::gl::rgb(0xC99E48)]);
+        // Twelve vertices a blade.
+        assert!(b.pos.len() / 36 >= 3500, "{} blades", b.pos.len() / 36);
+        let roots_in_field = b.pos.chunks(3).all(|q| v3(q[0], q[1], q[2]).norm().dot(centre) > (ang + 0.02).cos());
+        assert!(roots_in_field);
+    }
+
+    #[test]
+    fn a_skirt_hangs_from_open_edges_only() {
+        let mut b = Builder::default();
+        let w = crate::gl::rgb(0xFFFFFF);
+        let (p0, p1, p2, p3) = (v3(0.0, 10.0, 0.0), v3(1.0, 10.0, 0.0), v3(0.0, 10.0, 1.0), v3(1.0, 10.0, 1.0));
+        b.tri([p0, p1, p2], [(0.0, 0.0); 3], w, V3::Y, None);
+        b.tri([p1, p3, p2], [(0.0, 0.0); 3], w, V3::Y, None);
+        let skirted = b.with_skirt(0.5);
+        // Two triangles share one edge; the other four edges each get a quad
+        // seen from both sides: four triangles of three vertices.
+        assert_eq!(skirted.pos.len() / 3, 6 + 4 * 4 * 3);
     }
 
     #[test]

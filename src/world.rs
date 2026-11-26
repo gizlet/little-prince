@@ -55,10 +55,12 @@ impl Kind {
 const FOX_TRUST: usize = 5;
 /// Up to `CLOSE` from the camera a cell has all its grass, flowers and full
 /// scenery; up to `NEAR` half the grass; up to `MID` only coarser scenery;
-/// beyond, only the ground.
+/// beyond, only the ground. Groups of four cells all beyond `GROUP` are
+/// drawn as one.
 const CLOSE: f32 = 3.0;
 const NEAR: f32 = 6.0;
-const MID: f32 = 16.0;
+const GROUP: f32 = 9.0;
+const MID: f32 = 10.0;
 /// The nearest the stars, sun and moon are drawn to the camera; farther
 /// when the camera is high enough to see more of the planet than that.
 pub const SKY_D: f32 = 26.0;
@@ -555,6 +557,8 @@ pub struct World {
     pub radius: f32,
     /// The distance from the centre to the highest point of the ground or scenery.
     top: f32,
+    /// The distance from the centre to the lowest ground.
+    floor: f32,
     pal: Pal,
     sun0: V3,
     period: f32,
@@ -625,6 +629,7 @@ impl World {
         let spawn = V3::Y;
         let r = move |n: V3| ground_r(kind, n);
         let ground = mesh::planet(6, &r, &|n, h| ground_colour(kind, n, h));
+        let coarse_ground = mesh::planet(4, &r, &|n, h| ground_colour(kind, n, h));
         let mut grass;
         let mut stars: Vec<Star> = (0..360)
             .map(|_| Star { d: rng.dir(), size: rng.range(0.12, 0.42), phase: rng.range(0.0, TAU), col: rgb(0xE8EEFF) })
@@ -638,6 +643,7 @@ impl World {
             kind,
             radius: r(spawn),
             top: 0.0,
+            floor: 0.0,
             pal,
             sun0,
             period,
@@ -980,9 +986,10 @@ impl World {
                 let bare = taken.clone();
                 let clear = within(0.15);
                 let field = move |d: V3| d.dot(wheat) > field_edge && bare.iter().all(|t| t.dot(d) < clear);
-                grass = mesh::grass(
+                grass = mesh::grass_in(
                     &mut rng,
                     3500,
+                    (wheat, ang(1.6)),
                     &r,
                     &field,
                     (0.1, 0.22),
@@ -1007,6 +1014,7 @@ impl World {
         let lo = props.lo.take().map(|b| *b).unwrap_or_default();
         (w.tiles, w.groups) = mesh::tiles(
             [ground, props, lo, decor, grass],
+            coarse_ground,
             mesh::TileLayers {
                 props: !crate::prof::skip("props"),
                 flowers: !crate::prof::skip("flowers"),
@@ -1014,6 +1022,7 @@ impl World {
             },
         );
         w.top = w.tiles.iter().map(|t| t.top).fold(w.radius, f32::max);
+        w.floor = w.tiles.iter().map(|t| t.low).fold(w.radius, f32::min);
         w
     }
 
@@ -1351,55 +1360,48 @@ impl World {
     }
 
     /// Queues the visible planet tiles front to back for early depth rejection.
-    fn queue_tiles(&self, gl: &Gl, cam: V3, fwd: V3) {
-        const VIEW_DISTANCE: f32 = 60.0;
-        let r = self.radius;
-        let cam_dist = cam.len().max(r + 0.01);
-        let cam_dir = cam * (1.0 / cam_dist);
-        let cam_horizon = (r / cam_dist).min(1.0).acos();
+    fn queue_tiles(&self, gl: &Gl, cam: V3, fwd: V3, detail: f32) {
+        let (close, near, group, mid) = (CLOSE * detail, NEAR * detail, GROUP * detail, MID * detail);
+        let cells = self.tiles.iter().map(|t| (t.dir, t.ang, t.low));
+        let horizon = Horizon::new(cam, self.floor, cells);
         let mut visible = Vec::with_capacity(self.tiles.len());
         // Preserve the existing tie order for equally distant cells.
         for tile in self.tiles.iter().rev() {
-            // A cell shows above the horizon as far as its highest point reaches.
-            let height = (tile.top - r).max(0.3);
-            let horizon = cam_horizon + (r / (r + height)).acos();
-            let theta = tile.dir.dot(cam_dir).clamp(-1.0, 1.0).acos();
-            if theta - tile.ang > horizon + 0.05 {
-                continue;
-            }
-            let extent = r * tile.ang;
-            let bound = extent + height;
-            let delta = tile.dir * r - cam;
-            let dist = delta.len();
-            if dist - bound < VIEW_DISTANCE && delta.dot(fwd) > -bound {
-                visible.push(((dist - extent).max(0.0), tile));
+            let view = View { cam, fwd, floor: horizon.floor(tile.dir, tile.ang), radius: self.radius };
+            if let Some(dist) = view.tile(tile.dir, tile.ang, tile.top) {
+                visible.push((dist, tile));
             }
         }
         visible.sort_by(|a, b| a.0.total_cmp(&b.0));
-        // A group whose cells in view are all far away is drawn as one mesh,
-        // where its nearest cell would have been.
+        // A group whose cells in view are all some way off is drawn as one
+        // mesh, where its nearest cell would have been.
         let mut near_cells = vec![0u8; self.groups.len()];
-        let mut far_cells = vec![0u8; self.groups.len()];
+        let mut grouped = vec![0u8; self.groups.len()];
         for (dist, tile) in &visible {
-            if *dist < MID {
+            if *dist < group {
                 near_cells[tile.group] += 1;
             } else {
-                far_cells[tile.group] += 1;
+                grouped[tile.group] += 1;
             }
         }
         let mut drawn = vec![false; self.groups.len()];
         for (dist, tile) in visible {
-            let (mesh, lod) = if dist < CLOSE {
+            let cells = &self.groups[tile.group];
+            let (mesh, lod) = if dist < close {
                 (tile.close, "close")
-            } else if dist < NEAR {
+            } else if dist < near {
                 (tile.near, "near")
-            } else if dist < MID {
-                (tile.mid, "mid")
-            } else if near_cells[tile.group] == 0 && far_cells[tile.group] > 1 {
+            } else if near_cells[tile.group] == 0 && grouped[tile.group] > 1 {
                 if std::mem::replace(&mut drawn[tile.group], true) {
                     continue;
                 }
-                (self.groups[tile.group].far, "far")
+                if dist < mid {
+                    (cells.mid, "mid")
+                } else {
+                    (cells.far, "far")
+                }
+            } else if dist < mid {
+                (tile.mid, "mid")
             } else {
                 (tile.far, "far")
             };
@@ -1407,10 +1409,11 @@ impl World {
         }
     }
 
-    /// The solid parts of the planet, queued for `Gl::flush`.
-    pub fn draw(&self, gl: &Gl, kit: &Kit, t: f32, cam: V3, fwd: V3) {
+    /// The solid parts of the planet, queued for `Gl::flush`. `detail`
+    /// stretches the distances at which cells lose detail.
+    pub fn draw(&self, gl: &Gl, kit: &Kit, t: f32, cam: V3, fwd: V3, detail: f32) {
         if !crate::prof::skip("world") {
-            self.queue_tiles(gl, cam, fwd);
+            self.queue_tiles(gl, cam, fwd, detail);
         }
         let wind = self.pal.wind;
         let ri = Ink::Radial;
@@ -1651,6 +1654,102 @@ impl World {
     }
 }
 
+/// The lowest ground round the camera, by direction: what can hide things
+/// from it.
+///
+/// A line of sight that dips below a sphere of radius `R` enters it within
+/// `acos(R / |cam|)` of the camera, over the arc towards its target. So for
+/// each of `SECTORS` directions round the camera this keeps the lowest ground
+/// of the cells within that reach and that direction: a sphere that size
+/// hides no more than the ground does there.
+struct Horizon {
+    cam_dir: V3,
+    x: V3,
+    z: V3,
+    floors: [f32; SECTORS],
+}
+
+const SECTORS: usize = 16;
+
+impl Horizon {
+    /// `floor` is the lowest ground on the planet; `cells` give each cell's
+    /// centre, angular size and lowest ground.
+    fn new(cam: V3, floor: f32, cells: impl Iterator<Item = (V3, f32, f32)>) -> Horizon {
+        let dist = cam.len();
+        let cam_dir = cam.norm();
+        let x = any_perp(cam_dir);
+        let mut h = Horizon { cam_dir, x, z: cam_dir.cross(x), floors: [dist; SECTORS] };
+        let reach = (floor / dist.max(floor)).acos() + 0.02;
+        for (dir, ang, low) in cells {
+            if h.theta(dir) - ang <= reach {
+                for k in h.sectors(dir, ang) {
+                    h.floors[k] = h.floors[k].min(low);
+                }
+            }
+        }
+        h
+    }
+
+    fn theta(&self, dir: V3) -> f32 {
+        dir.dot(self.cam_dir).clamp(-1.0, 1.0).acos()
+    }
+
+    /// The sectors a cell of angular size `ang` round `dir` reaches into.
+    fn sectors(&self, dir: V3, ang: f32) -> impl Iterator<Item = usize> {
+        let theta = self.theta(dir);
+        let width = TAU / SECTORS as f32;
+        let (first, count) = if theta <= ang + 0.01 {
+            (0, SECTORS)
+        } else {
+            let az = dir.dot(self.z).atan2(dir.dot(self.x));
+            let half = (ang.sin() / theta.sin()).min(1.0).asin() + 0.01;
+            let lo = ((az - half) / width).floor() as i32;
+            let hi = ((az + half) / width).floor() as i32;
+            (lo, ((hi - lo + 1) as usize).min(SECTORS))
+        };
+        (0..count).map(move |i| (first + i as i32).rem_euclid(SECTORS as i32) as usize)
+    }
+
+    /// The lowest ground between the camera and a cell.
+    fn floor(&self, dir: V3, ang: f32) -> f32 {
+        self.sectors(dir, ang).map(|k| self.floors[k]).fold(f32::MAX, f32::min)
+    }
+}
+
+/// Where the camera is, for choosing the cells to draw.
+struct View {
+    cam: V3,
+    fwd: V3,
+    /// The lowest ground on the planet: nothing hides the view to a cell
+    /// more than a smooth sphere this size would.
+    floor: f32,
+    radius: f32,
+}
+
+impl View {
+    /// How far away a cell is, or None when it is below the horizon, behind
+    /// the camera or too far to draw. `dir` is its centre, `ang` the angle
+    /// to its farthest vertex and `top` its highest point from the centre.
+    fn tile(&self, dir: V3, ang: f32, top: f32) -> Option<f32> {
+        const VIEW_DISTANCE: f32 = 60.0;
+        let (r, floor) = (self.radius, self.floor);
+        let cam_dist = self.cam.len();
+        let cam_dir = self.cam.norm();
+        let cam_horizon = (floor / cam_dist.max(floor)).acos();
+        // A cell shows above the horizon as far as its highest point reaches.
+        let top_horizon = (floor / top.max(floor + 0.3)).acos();
+        let theta = dir.dot(cam_dir).clamp(-1.0, 1.0).acos();
+        if theta - ang > cam_horizon + top_horizon + 0.05 {
+            return None;
+        }
+        let extent = r * ang;
+        let bound = extent + (top - r).max(r - floor).max(0.3);
+        let delta = dir * r - self.cam;
+        let dist = delta.len();
+        (dist - bound < VIEW_DISTANCE && delta.dot(self.fwd) > -bound).then_some((dist - extent).max(0.0))
+    }
+}
+
 fn draw_fox(gl: &Gl, kit: &Kit, f: &Fox, r: f32, t: f32) {
     let orange = rgb(0xE8873A);
     let cream = rgb(0xFFF1DE);
@@ -1737,6 +1836,40 @@ mod tests {
         }
         assert!(KINDS.iter().all(|k| Kind::Lamp.radius() <= k.radius()));
         assert!(KINDS.iter().all(|k| Kind::Desert.radius() >= k.radius()));
+    }
+
+    #[test]
+    fn a_camera_low_in_a_valley_still_sees_the_ground_ahead() {
+        // B612's ground dips about 1.5 units below its spawn radius.
+        let (radius, floor) = (18.0, 16.5);
+        let n = V3::Y;
+        let ahead = v3(0.0, 0.0, 1.0);
+        let view = View { cam: n * 16.9, fwd: ahead, floor, radius };
+        let dir = n.rotate(v3(1.0, 0.0, 0.0), 0.35);
+        assert!(view.tile(dir, 0.05, 17.1).is_some());
+        // The far side of the planet stays hidden.
+        assert!(view.tile(-n, 0.05, 19.0).is_none());
+        // Behind the camera, beyond its own cell, nothing is drawn.
+        assert!(view.tile(n.rotate(v3(1.0, 0.0, 0.0), -0.5), 0.05, 18.0).is_none());
+    }
+
+    #[test]
+    fn only_valleys_near_the_camera_and_towards_a_cell_lower_its_horizon() {
+        let n = V3::Y;
+        let toward = |f: f32, s: f32| n.rotate(v3(1.0, 0.0, 0.0), f).rotate(v3(0.0, 0.0, 1.0), s).norm();
+        let cam = n * 18.5;
+        let ahead = toward(0.6, 0.0);
+        let cells =
+            |valley: V3| [(n, 0.03, 17.8), (toward(0.2, 0.0), 0.03, 17.6), (valley, 0.03, 16.6), (-n, 0.03, 16.5)];
+        // A valley behind the camera or on the far side does not matter.
+        let behind = Horizon::new(cam, 16.5, cells(toward(-0.3, 0.0)).into_iter());
+        assert_eq!(behind.floor(ahead, 0.03), 17.6);
+        // One near the camera, on the way, does.
+        let on_the_way = Horizon::new(cam, 16.5, cells(toward(0.3, 0.0)).into_iter());
+        assert_eq!(on_the_way.floor(ahead, 0.03), 16.6);
+        // The cell under the camera counts in every direction.
+        let under = Horizon::new(cam, 16.5, [(n, 0.03, 16.9)].into_iter());
+        assert_eq!(under.floor(toward(0.0, 0.6), 0.03), 16.9);
     }
 
     #[test]

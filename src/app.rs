@@ -629,7 +629,9 @@ impl App {
                 ffi::rlDisableColorBlend();
             }
         }
-        w.draw(g, &self.kit, t, self.cam.pos, fwd);
+        // The title looks at the planet from afar, with nothing else to draw.
+        let detail = if self.mode == Mode::Title { 1.6 } else { 1.0 };
+        w.draw(g, &self.kit, t, self.cam.pos, fwd, detail);
         crate::prof::mark("world-queue");
         match &self.hero {
             Some(_) if crate::prof::skip("hero") => {}
