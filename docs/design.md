@@ -41,7 +41,8 @@ planet cheap to draw.
 1. **Star map.** X opens a map of the three planets joined by the migrating
    birds' routes. Planets already visited can be revisited at any time; a new
    route opens when the previous planet's main task is done
-   (B612, then the lamplighter's planet, then the desert).
+   (B612, then the lamplighter's planet, then the desert). The map is a page
+   of the storybook (see below).
 2. **Arrival, conversation, task.** Each planet has a character to talk to
    (the rose, the lamplighter, the fox and the aviator) and a main task. Side
    goals give stardust and achievements.
@@ -49,18 +50,38 @@ planet cheap to draw.
    B612 for a gentle ending: the rose, a sunset, and the aviator looking up at
    the stars on Earth. Afterwards the game continues in free play.
 
-## Travellers
+## The prince
 
-Four playable travellers from KayKit Adventurers 1.0 (CC0), each wearing the
-prince's scarf. Every planet can be finished with any of them; each is better
-at one kind of trouble.
+There is one hero, the little prince. His model is being made in a separate
+repository; until it lands the hooded rogue from KayKit Adventurers 1.0
+stands in for him. The hero is loaded from one file with named animations
+(idle, walk, run, jump, landing, cheer), so swapping the model touches only
+`assets/hero` and the animation names in `src/hero.rs`.
 
-| Traveller | Strength |
-| --- | --- |
-| Hooded rogue | Fast, and moves without startling animals |
-| Knight | A shield against volcano cinders; pushes rocks aside |
-| Mage | A light that drives off snuffer moths |
-| Barbarian | Jumps high; landing stuns small troubles nearby |
+## The storybook
+
+The title, the journeys and the star map are pages of one illustrated book
+on a starry background, drawn at 640×480:
+
+- **Cover.** The closed book floats in space and turns slowly, with the
+  title on its cover. A opens it.
+- **Journeys.** The first spread holds the three journeys as bookmarked
+  pages: the planet the journey stopped on, its tasks and play time.
+- **Star chart.** A parchment spread with torn edges and watercolour clouds.
+  The three planets are the real planet meshes rendered small and turning
+  slowly: in colour once visited, as blue ink sketches before that, with a
+  gold ring round the current one. Dotted bird routes join them; a locked
+  route is drawn faint. Left and right move between planets.
+- **Chapter page.** A on a planet turns the page to its chapter: the planet
+  large on the left page; on the right the chapter number, the planet's
+  name, one line of story, the task's progress and "Fly there". A flies, B
+  turns back to the chart.
+- **Page turns.** A curled page mesh sweeps across the spread in about half a
+  second; menus stay usable with no effects (level 0) by cutting instead.
+
+X during play opens the book straight on the star chart. The book is drawn
+only while it is open, so it costs nothing on a planet; while open it stays
+within the walking budget.
 
 ## Saves and records
 
@@ -82,7 +103,7 @@ at one kind of trouble.
 | A | Jump; talk or act when something is near | Choose |
 | B | Hold to sit and wait | Back |
 | X | Star map | |
-| Y | Swap traveller | |
+| Y | Effects level | |
 | Start | Pause menu | |
 | Select | Journal | |
 
@@ -122,9 +143,9 @@ To afford planets four to eight times the area:
 | --- | --- |
 | M1 | This document; bigger planets |
 | M2 | Saves, settings, pause menu, controls, statistics |
-| M3 | Star map, conversations, interaction, tasks |
-| M4 | Troubles and stardust; B612's task |
-| M5 | Four travellers |
+| M3 | Routes, conversations, interaction, tasks (the star map as a plain list) |
+| M4 | The storybook: cover, journeys, star chart, chapter pages |
+| M5 | Troubles and stardust; B612's task |
 | M6 | The lamplighter's and the desert's tasks |
 | M7 | Journal, achievements, ending, free play, texts and documentation |
 

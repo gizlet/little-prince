@@ -33,8 +33,8 @@ actions = { zh-CN = "行走" }
 
 [[controls]]
 button = "a"
-action = "Jump; choose in menus"
-actions = { zh-CN = "跳跃；在菜单中选择" }
+action = "Jump; talk when someone is near; choose in menus"
+actions = { zh-CN = "跳跃；靠近时对话；在菜单中选择" }
 
 [[controls]]
 button = "b"
@@ -43,8 +43,8 @@ actions = { zh-CN = "在菜单中返回" }
 
 [[controls]]
 button = "x"
-action = "Fly to the next planet"
-actions = { zh-CN = "飞往下一颗星球" }
+action = "Star map"
+actions = { zh-CN = "星图" }
 
 [[controls]]
 button = "y"
