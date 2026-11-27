@@ -87,6 +87,16 @@ scripts/play-tests.sh
 
 `scripts/play-tests.sh` plays the button replays in `tests/scripts` on the desktop build, each group of them on a fresh save folder: starting a journey, coming back to it, deleting it, and finishing the three planets' tasks in turn.
 
+## Play on Windows
+
+Install it from the Store in [Gizlet Launcher for Windows](https://github.com/gizlet/windows), which keeps each profile's journeys apart in `GIZLET_SAVE_DIR`. The Windows x64 package is built by `scripts/package.ps1` on Windows, with Python 3.11 or newer, the Rust `x86_64-pc-windows-msvc` target and Visual Studio's C++ tools, CMake and LLVM:
+
+```powershell
+./scripts/package.ps1
+```
+
+It writes `dist/io.gizlet.littleprince-<version>-x86_64-pc-windows-msvc-full.gzl`, which the Launcher can also import. The C runtime is linked statically (`.cargo/config.toml`), so the game needs nothing else installed.
+
 ## Run on Gizlet OS
 
 On the device the game links Gizlet runtime 1's `libraylib.so.600`, built for DRM with OpenGL ES 3.0 (ES 2 runtimes work too; the shaders follow the context raylib makes), and reads the handheld's buttons from evdev. `scripts/package.sh` builds the application and writes its `.gzl` package.
@@ -95,8 +105,8 @@ Install Python 3.11 or newer, [zig](https://ziglang.org), and the Rust `aarch64-
 
 ```sh
 GIZLET_RAYLIB_LIB=/path/to/folder/with/libraylib.so scripts/package.sh
-scp dist/io.gizlet.littleprince-0.2.2-aarch64-unknown-linux-gnu-lite.gzl root@DEVICE:/tmp/
-ssh root@DEVICE 'gizlet install /tmp/io.gizlet.littleprince-0.2.2-aarch64-unknown-linux-gnu-lite.gzl'
+scp dist/io.gizlet.littleprince-0.3.0-aarch64-unknown-linux-gnu-lite.gzl root@DEVICE:/tmp/
+ssh root@DEVICE 'gizlet install /tmp/io.gizlet.littleprince-0.3.0-aarch64-unknown-linux-gnu-lite.gzl'
 ```
 
 Open the game from the launcher. To publish a release, update the version in

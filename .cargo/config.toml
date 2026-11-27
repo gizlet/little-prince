@@ -1,0 +1,7 @@
+# Windows: link the C runtime statically, so the game runs on a clean Windows without the
+# Visual C++ redistributable. raylib-sys's CMake build follows the same setting.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
