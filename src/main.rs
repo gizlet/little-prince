@@ -15,7 +15,8 @@
 //! - `LITTLEPRINCE_MUTE=1`: no sound.
 //! - `LITTLEPRINCE_CAPTURE=FILE.png` with `LITTLEPRINCE_SCENE` (`title`, `icon`,
 //!   `b612`, `lamp`, `desert`, `fly`, `journeys`, `pause`, `settings`,
-//!   `statistics`) and `LITTLEPRINCE_AT` (seconds of autoplay first):
+//!   `statistics`, `starmap`, `dialog`) and `LITTLEPRINCE_AT` (seconds of
+//!   autoplay first):
 //!   render one frame to a PNG and exit.
 //! - `LITTLEPRINCE_SECONDS=N`: quit after N seconds (for scripted runs).
 //! - `LITTLEPRINCE_SCRIPT=FILE`: replay the button presses in FILE and check
@@ -25,6 +26,7 @@
 //!   otherwise); captures save nothing.
 
 mod app;
+mod dialog;
 #[cfg(all(target_os = "linux", feature = "gizlet-os"))]
 mod evdev;
 mod fx;
@@ -146,6 +148,7 @@ fn main() {
         let dt = if fixed { 1.0 / 60.0 } else { unsafe { ffi::GetFrameTime() }.min(0.1) };
         if let Some(r) = &mut replay {
             controls.scripted = r.step(steps as f32 / 60.0, &|name| app.probe(name));
+            app.assist = r.assist;
             steps += 1;
             if r.done {
                 break;
@@ -285,6 +288,25 @@ fn setup_capture(app: &mut App, c: &input::Controls) {
             };
             app.menu = Some(menu::Menu::open(page, 0));
         }
+        "starmap" | "dialog" => {
+            // Journey 1 on the lamplighter's planet with B612's task done for
+            // the map; by the rose, as the task begins, for the conversation.
+            app.autoplay = true;
+            app.start_play(if scene == "starmap" { 1 } else { 0 });
+            step(app, at);
+            app.autoplay = false;
+            app.slot = Some(0);
+            app.journey.visited = [true, true, false];
+            app.journey.done = [true, false, false];
+            if scene == "starmap" {
+                app.menu = Some(menu::Menu::open(menu::Page::StarMap, 2));
+            } else {
+                app.journey.done = [false; 3];
+                let mut d = dialog::Dialog::with(world::Kind::B612, 0, false, false);
+                d.shown = f32::MAX;
+                app.dialog = Some(d);
+            }
+        }
         "b612" | "lamp" | "desert" | "fly" => {
             let idx = match scene.as_str() {
                 "lamp" => 1,
@@ -295,7 +317,7 @@ fn setup_capture(app: &mut App, c: &input::Controls) {
             app.start_play(idx);
             step(app, at);
             if scene == "fly" {
-                app.begin_flight();
+                app.begin_flight((app.cur + 1) % app.worlds.len());
                 step(app, 1.5);
             }
             assert!(app.mode != Mode::Title);

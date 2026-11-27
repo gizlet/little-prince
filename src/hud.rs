@@ -3,11 +3,12 @@
 //! performance panel (FPS with a frame-time graph, CPU, memory, temperature).
 
 use crate::app::{App, Mode};
+use crate::dialog::Dialog;
 use crate::gl::{lighten, rgb, rgba};
 use crate::math::{clamp01, smooth};
 use crate::menu::{Menu, Page, PauseItem, Setting, PAUSE, SETTINGS};
 use crate::save::Slot;
-use crate::text::{s, Align, Lang, Weight, T};
+use crate::text::{s, Align, Fonts, Lang, Weight, T};
 use raylib_sys::{self as ffi, Camera2D, Color, Rectangle, RenderTexture2D, Vector2};
 use std::cell::RefCell;
 
@@ -135,6 +136,11 @@ pub fn draw(app: &App) {
     if let Some(m) = &app.menu {
         menu(app, m);
     }
+    if app.menu.is_none() && app.mode == Mode::Play {
+        if let Some(d) = &app.dialog {
+            dialog(app, d);
+        }
+    }
     if app.quit_hold > 0.15 {
         let f = &app.fonts;
         let k = clamp01(app.quit_hold / 2.0);
@@ -244,6 +250,12 @@ fn play(app: &App) {
     }
     f.text(&text, 632.0 - 10.0, 10.0 + (h - size * 1.2) / 2.0, size, CREAM, Align::Right);
 
+    if app.mode == Mode::Play && !app.autoplay && app.dialog.is_none() && app.menu.is_none() && app.near_speaker() {
+        let label = format!("A  {}", s(T::Talk, l));
+        let w = f.measure(&label, 14.0, Weight::Text) + 28.0;
+        rrect(320.0 - w / 2.0, 392.0, w, 26.0, 13.0, rgba(PANEL, 0.6));
+        f.text(&label, 320.0, 396.0, 14.0, CREAM, Align::Center);
+    }
     if app.autoplay {
         let a = 0.55 + 0.45 * (app.t * 2.5).sin();
         f.shadowed(s(T::Autoplay, l), 632.0, 44.0, 11.0, rgba(CREAM, a), Align::Right, Weight::Text);
@@ -314,6 +326,7 @@ fn statistics(app: &App) -> Vec<(String, String)> {
         (s(T::SproutsPulled, l).into(), st.sprouts.to_string()),
         (s(T::Flights, l).into(), st.flights.to_string()),
         (s(T::Visited, l).into(), format!("{visited}/3")),
+        (s(T::TasksDone, l).into(), format!("{}/3", app.journey.done.iter().filter(|d| **d).count())),
     ]
 }
 
@@ -388,6 +401,23 @@ fn menu(app: &App, m: &Menu) {
                 .collect();
             (T::Settings, 32.0, rows, [format!("←→ {}", s(T::Change, l)), key("B", T::GoBack)].join("   "))
         }
+        Page::StarMap => {
+            let rows = (0..3)
+                .map(|i| {
+                    let status = if i == app.cur {
+                        T::Here
+                    } else if app.journey.done[i] {
+                        T::TaskDone
+                    } else if app.route_open(i) {
+                        T::OpenRoute
+                    } else {
+                        T::Locked
+                    };
+                    (s(PLANET_NAMES[i], l).to_string(), s(status, l).to_string())
+                })
+                .collect();
+            (T::StarMap, 32.0, rows, [key("A", T::FlyThere), key("B", T::GoBack)].join("   "))
+        }
         Page::Statistics => (T::Statistics, 26.0, statistics(app), key("B", T::GoBack)),
     };
     let w = 360.0;
@@ -427,6 +457,47 @@ fn menu(app: &App, m: &Menu) {
         (hint, SOFT)
     };
     f.text(&hint, 320.0, y + h - 28.0, 11.0, col, Align::Center);
+}
+
+/// Breaks `text` into lines no wider than `width`: at spaces, or between
+/// any two Chinese characters.
+fn wrap(f: &Fonts, text: &str, size: f32, width: f32) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut cur = String::new();
+    for piece in text.split_inclusive(|c: char| c == ' ' || !c.is_ascii()) {
+        let next = format!("{cur}{piece}");
+        if !cur.is_empty() && f.measure(next.trim_end(), size, Weight::Text) > width {
+            lines.push(cur.trim_end().to_string());
+            cur = piece.trim_start().to_string();
+        } else {
+            cur = next;
+        }
+    }
+    if !cur.trim().is_empty() {
+        lines.push(cur.trim_end().to_string());
+    }
+    lines
+}
+
+/// A conversation: the speaker's name and the line so far, letter by
+/// letter, in a panel low on the screen.
+fn dialog(app: &App, d: &Dialog) {
+    let f = &app.fonts;
+    let l = app.lang;
+    let Some(t) = d.lines.get(d.line) else { return };
+    let (x, y, w, h) = (40.0, 316.0, 560.0, 104.0);
+    rrect(x, y, w, h, 14.0, rgba(PANEL, 0.88));
+    f.text(s(d.speaker, l), x + 20.0, y + 12.0, 14.0, GOLD, Align::Left);
+    let mut left = d.shown as usize;
+    for (i, line) in wrap(f, s(*t, l), 15.0, w - 40.0).iter().enumerate() {
+        let part: String = line.chars().take(left).collect();
+        left = left.saturating_sub(line.chars().count());
+        f.text(&part, x + 20.0, y + 36.0 + i as f32 * 20.0, 15.0, CREAM, Align::Left);
+    }
+    if d.whole(l) {
+        let pulse = 0.55 + 0.45 * (app.clock * 4.0).sin();
+        f.text(&format!("A {}", s(T::Next, l)), x + w - 20.0, y + h - 22.0, 11.0, rgba(SOFT, pulse), Align::Right);
+    }
 }
 
 fn opt(v: Option<f32>, digits: usize) -> String {

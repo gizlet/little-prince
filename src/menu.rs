@@ -10,6 +10,8 @@ pub enum Page {
     Pause,
     Settings,
     Statistics,
+    /// The three planets and the birds' routes between them, on X.
+    StarMap,
 }
 
 /// The pause menu's rows.
@@ -51,6 +53,8 @@ pub enum Action {
     SaveAndQuit,
     /// Change a setting one step, `-1` or `+1`.
     Change(Setting, i32),
+    /// Fly to planet `n`, if a route is open.
+    Fly(usize),
 }
 
 /// The buttons a menu reacts to, pressed this frame.
@@ -91,6 +95,7 @@ impl Menu {
             Page::Pause => PAUSE.len(),
             Page::Settings => SETTINGS.len(),
             Page::Statistics => 0,
+            Page::StarMap => 3,
         }
     }
 
@@ -151,6 +156,8 @@ impl Menu {
             },
             Page::Settings if k.left => Action::Change(SETTINGS[row], -1),
             Page::Settings if k.right || k.a => Action::Change(SETTINGS[row], 1),
+            Page::StarMap if k.a => Action::Fly(row),
+            Page::StarMap if k.x => self.back(),
             Page::Statistics if k.a => self.back(),
             _ => Action::None,
         }
@@ -192,6 +199,10 @@ mod tests {
 
     #[test]
     fn rows_wrap_round() {
+        let mut m = Menu::open(Page::StarMap, 1);
+        m.step(press(|k| k.down = true));
+        assert_eq!(m.step(press(|k| k.a = true)), Action::Fly(2));
+        assert_eq!(m.step(press(|k| k.x = true)), Action::Close, "X closes the map it opened");
         let mut m = Menu::open(Page::Pause, 0);
         m.step(press(|k| k.up = true));
         assert_eq!(m.top(), (Page::Pause, PAUSE.len() - 1));
