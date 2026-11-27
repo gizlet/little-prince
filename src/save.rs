@@ -237,7 +237,9 @@ impl Store {
                 f.write_all(text.as_bytes())?;
                 f.sync_all()?;
             }
-            std::fs::rename(&tmp, dir.join(name))
+            std::fs::rename(&tmp, dir.join(name))?;
+            // The rename only survives a power cut once the folder is synced.
+            std::fs::File::open(dir)?.sync_all()
         })();
         if let Err(e) = &ok {
             eprintln!("littleprince: could not save {name}: {e}");
@@ -255,11 +257,21 @@ impl Store {
     }
 
     /// Moves a journey out of the way rather than deleting it: renamed to
-    /// `slotN.txt.old`, replacing any older one.
-    pub fn clear_journey(&mut self, slot: usize) {
-        let Some(dir) = &self.dir else { return };
+    /// `slotN.txt.old`, replacing any older one. Whether the slot is empty
+    /// now.
+    pub fn clear_journey(&mut self, slot: usize) -> bool {
+        let Some(dir) = &self.dir else { return true };
         let name = Self::slot_name(slot);
-        let _ = std::fs::rename(dir.join(&name), dir.join(format!("{name}.old")));
+        let ok = match std::fs::rename(dir.join(&name), dir.join(format!("{name}.old"))) {
+            Ok(()) => std::fs::File::open(dir).and_then(|d| d.sync_all()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
+        };
+        if let Err(e) = &ok {
+            eprintln!("littleprince: could not clear {name}: {e}");
+        }
+        self.failed = ok.is_err();
+        !self.failed
     }
 
     pub fn settings(&self) -> Settings {
@@ -373,6 +385,24 @@ mod tests {
         assert!(!store.save_journey(1, &other));
         assert!(store.failed);
         assert_eq!(store.journey(1), Some(j));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_deletion_keeps_the_journey_and_says_so() {
+        let dir = temp_dir("clear");
+        let mut store = Store::at(&dir);
+        let j = sample();
+        assert!(store.save_journey(2, &j));
+        // A non-empty folder where the journey would be moved makes the
+        // rename fail.
+        std::fs::create_dir_all(dir.join("slot3.txt.old").join("x")).unwrap();
+        assert!(!store.clear_journey(2));
+        assert!(store.failed);
+        assert_eq!(store.journey(2), Some(j));
+        // An empty slot is already cleared.
+        assert!(store.clear_journey(0));
+        assert!(!store.failed);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

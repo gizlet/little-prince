@@ -312,9 +312,12 @@ impl App {
             Action::Close => self.menu = None,
             Action::Load(slot) => self.load(slot),
             Action::Clear(slot) => {
-                self.store.clear_journey(slot);
-                self.journeys[slot] = None;
-                self.snd.play(Sfx::Splash, 0.8, 0.4);
+                // Shown empty only once it is moved aside; otherwise the
+                // journeys page says the deletion failed.
+                if self.store.clear_journey(slot) {
+                    self.journeys[slot] = None;
+                    self.snd.play(Sfx::Splash, 0.8, 0.4);
+                }
             }
             // Only once the journey is safely written: otherwise the pause
             // menu stays, telling why, with the journey still in play.

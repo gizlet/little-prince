@@ -70,14 +70,14 @@ pub struct Keys {
 #[derive(Clone, Debug)]
 pub struct Menu {
     stack: Vec<(Page, usize)>,
-    /// On the journeys page: X was pressed once on the selected journey and
-    /// a second press deletes it.
-    pub confirm: bool,
+    /// On the journeys page: the journey X was pressed once on; a second
+    /// press on the same journey deletes it.
+    pub confirm: Option<usize>,
 }
 
 impl Menu {
     pub fn open(page: Page, row: usize) -> Menu {
-        Menu { stack: vec![(page, row.min(Self::rows(page).saturating_sub(1)))], confirm: false }
+        Menu { stack: vec![(page, row.min(Self::rows(page).saturating_sub(1)))], confirm: None }
     }
 
     /// The page on top and its selected row.
@@ -128,10 +128,12 @@ impl Menu {
             Page::Journeys => {
                 if k.a {
                     Action::Load(row)
-                } else if k.x && confirm {
+                } else if k.x && confirm == Some(row) {
                     Action::Clear(row)
                 } else {
-                    self.confirm = k.x || (confirm && !(k.up || k.down || k.a || k.b || k.start));
+                    // Moving to another journey, even in the same frame as
+                    // X, asks again for that one.
+                    self.confirm = if k.x { Some(row) } else { confirm.filter(|c| *c == row && !(k.b || k.start)) };
                     Action::None
                 }
             }
@@ -200,16 +202,30 @@ mod tests {
     fn deleting_a_journey_takes_two_presses_in_a_row() {
         let mut m = Menu::open(Page::Journeys, 1);
         assert_eq!(m.step(press(|k| k.x = true)), Action::None);
-        assert!(m.confirm);
+        assert_eq!(m.confirm, Some(1));
         assert_eq!(m.step(Keys::default()), Action::None);
-        assert!(m.confirm, "waiting keeps the question open");
+        assert_eq!(m.confirm, Some(1), "waiting keeps the question open");
         assert_eq!(m.step(press(|k| k.x = true)), Action::Clear(1));
-        assert!(!m.confirm);
+        assert_eq!(m.confirm, None);
         // Moving away cancels it.
         m.step(press(|k| k.x = true));
         m.step(press(|k| k.down = true));
-        assert!(!m.confirm);
+        assert_eq!(m.confirm, None);
         assert_eq!(m.step(press(|k| k.x = true)), Action::None);
+    }
+
+    #[test]
+    fn moving_and_pressing_x_together_asks_about_the_new_journey() {
+        let mut m = Menu::open(Page::Journeys, 0);
+        m.step(press(|k| k.x = true));
+        assert_eq!(m.confirm, Some(0));
+        let down_and_x = press(|k| {
+            k.down = true;
+            k.x = true;
+        });
+        assert_eq!(m.step(down_and_x), Action::None, "journey 2 was never asked about");
+        assert_eq!(m.confirm, Some(1));
+        assert_eq!(m.step(press(|k| k.x = true)), Action::Clear(1));
     }
 
     #[test]

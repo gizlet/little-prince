@@ -87,9 +87,10 @@ pub enum T {
     SunsetsSeen,
     SproutsPulled,
     Flights,
+    DeleteFailed,
 }
 
-const ALL: [T; 61] = [
+const ALL: [T; 62] = [
     T::Title,
     T::Subtitle,
     T::PressStart,
@@ -151,6 +152,7 @@ const ALL: [T; 61] = [
     T::SunsetsSeen,
     T::SproutsPulled,
     T::Flights,
+    T::DeleteFailed,
 ];
 
 pub fn s(t: T, l: Lang) -> &'static str {
@@ -216,6 +218,7 @@ pub fn s(t: T, l: Lang) -> &'static str {
         T::SunsetsSeen => ("看过的日落", "Sunsets watched"),
         T::SproutsPulled => ("拔掉的幼苗", "Sprouts pulled"),
         T::Flights => ("飞行", "Flights"),
+        T::DeleteFailed => ("删除失败，这段旅程还在", "Could not delete: the journey is still there"),
     };
     match l {
         Lang::Zh => zh,

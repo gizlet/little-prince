@@ -416,10 +416,11 @@ fn menu(app: &App, m: &Menu) {
             }
         }
     }
-    let (hint, col) = if m.confirm {
+    let (hint, col) = if m.confirm.is_some() {
         (format!("X {}", s(T::ConfirmDelete, l)), rgb(0xFF8A7A))
     } else if app.store.failed {
-        (s(T::SaveFailed, l).to_string(), rgb(0xFF8A7A))
+        let t = if page == Page::Journeys { T::DeleteFailed } else { T::SaveFailed };
+        (s(t, l).to_string(), rgb(0xFF8A7A))
     } else {
         (hint, SOFT)
     };
