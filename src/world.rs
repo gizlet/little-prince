@@ -1111,6 +1111,16 @@ impl World {
         }
     }
 
+    /// Puts back a saved score: sprouts pulled, sunsets watched or the
+    /// fox's trust.
+    pub fn restore(&mut self, score: usize) {
+        let s = score.min(self.total);
+        self.score = s;
+        if let Some(fox) = &mut self.fox {
+            fox.trust = s;
+        }
+    }
+
     fn set_score(&mut self, s: usize) -> bool {
         let up = s > self.score;
         if up {

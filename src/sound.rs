@@ -22,6 +22,8 @@ pub enum Sfx {
 
 pub struct Sounds {
     on: bool,
+    /// The master volume, 0 to 1.
+    pub volume: f32,
     chimes: Vec<Vec<Sound>>,
     pop: Vec<Sound>,
     whoosh: Vec<Sound>,
@@ -107,6 +109,7 @@ impl Sounds {
     pub fn new(on: bool) -> Sounds {
         let mut s = Sounds {
             on,
+            volume: 1.0,
             chimes: vec![],
             pop: vec![],
             whoosh: vec![],
@@ -150,7 +153,7 @@ impl Sounds {
         let snd = set[self.next];
         unsafe {
             ffi::SetSoundPitch(snd, pitch);
-            ffi::SetSoundVolume(snd, volume);
+            ffi::SetSoundVolume(snd, volume * self.volume);
             ffi::PlaySound(snd);
         }
     }
