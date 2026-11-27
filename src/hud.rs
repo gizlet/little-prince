@@ -6,6 +6,7 @@ use crate::app::{App, Mode};
 use crate::gl::{lighten, rgb, rgba};
 use crate::math::{clamp01, smooth};
 use crate::menu::{Menu, Page, PauseItem, Setting, PAUSE, SETTINGS};
+use crate::save::Slot;
 use crate::text::{s, Align, Lang, Weight, T};
 use raylib_sys::{self as ffi, Camera2D, Color, Rectangle, RenderTexture2D, Vector2};
 use std::cell::RefCell;
@@ -332,7 +333,7 @@ fn menu(app: &App, m: &Menu) {
                 .map(|(i, j)| {
                     let head = format!("{} {}", s(T::Journey, l), i + 1);
                     match j {
-                        Some(j) => {
+                        Slot::Journey(j) => {
                             let visited = j.visited.iter().filter(|v| **v).count();
                             (
                                 format!("{head} · {}", s(PLANET_NAMES[j.planet], l)),
@@ -345,7 +346,8 @@ fn menu(app: &App, m: &Menu) {
                                 ),
                             )
                         }
-                        None => (head, s(T::NewJourney, l).into()),
+                        Slot::Empty => (head, s(T::NewJourney, l).into()),
+                        Slot::Unreadable => (head, s(T::Unreadable, l).into()),
                     }
                 })
                 .collect();

@@ -394,6 +394,8 @@ struct Sprout {
     n: V3,
     pos: V3,
     grow: f32,
+    /// How grown it was when the planet was made, to start a journey over.
+    grow0: f32,
     pulled: Option<f32>,
     phase: f32,
 }
@@ -780,13 +782,8 @@ impl World {
                 for n in
                     scatter(&mut rng, 7, ang(0.8), &mut taken, &|d| d.dot(V3::Y) > within(6.0) && off_path(d, 0.35))
                 {
-                    w.sprouts.push(Sprout {
-                        n,
-                        pos: n * r(n),
-                        grow: rng.range(0.6, 1.0),
-                        pulled: None,
-                        phase: rng.f() * TAU,
-                    });
+                    let grow = rng.range(0.6, 1.0);
+                    w.sprouts.push(Sprout { n, pos: n * r(n), grow, grow0: grow, pulled: None, phase: rng.f() * TAU });
                 }
                 // Woods and meadows thin out away from the path, so the far
                 // side of the planet stays open and cheap to draw.
@@ -1115,14 +1112,33 @@ impl World {
         }
     }
 
-    /// Puts back a saved score: sprouts pulled, sunsets watched or the
-    /// fox's trust.
+    /// Starts the planet over for a journey and puts back its saved score:
+    /// sprouts pulled, sunsets watched or the fox's trust. Nothing from the
+    /// journey or autoplay before carries over: sprouts are as they first
+    /// grew and the fox is back in its place.
     pub fn restore(&mut self, score: usize) {
         let s = score.min(self.total);
         self.score = s;
-        if let Some(fox) = &mut self.fox {
-            fox.trust = s;
+        self.pulled = 0;
+        self.pop = 0.0;
+        self.last_e = 1.0;
+        for sp in &mut self.sprouts {
+            sp.grow = sp.grow0;
+            sp.pulled = None;
         }
+        if let Some(rose) = &mut self.rose {
+            rose.near = false;
+        }
+        if self.fox.is_some() {
+            let mut fox = Fox::new(self.spawn);
+            fox.trust = s;
+            self.fox = Some(fox);
+        }
+    }
+
+    /// Sprouts pulled up and not yet grown back.
+    pub fn sprouts_out(&self) -> usize {
+        self.sprouts.iter().filter(|s| s.pulled.is_some()).count()
     }
 
     fn set_score(&mut self, s: usize) -> bool {

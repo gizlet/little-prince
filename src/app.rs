@@ -11,7 +11,7 @@ use crate::math::{any_perp, approach3, clamp01, place, smooth, v3, Rng, V3};
 use crate::menu::{Action, Keys, Menu, Page, Setting};
 use crate::mesh::Kit;
 use crate::player::{Ev, Player, SPEED};
-use crate::save::{Journey, Settings, Store, SLOTS};
+use crate::save::{Journey, Settings, Slot, Store, SLOTS};
 use crate::sound::{Sfx, Sounds};
 use crate::stats::Stats;
 use crate::text::{Fonts, Lang};
@@ -107,7 +107,7 @@ pub struct App {
     pub slot: Option<usize>,
     pub journey: Journey,
     /// The journeys on disk, for the journeys page.
-    pub journeys: [Option<Journey>; SLOTS],
+    pub journeys: [Slot; SLOTS],
     /// The menu on screen; play stops while one is open.
     pub menu: Option<Menu>,
     /// Seconds since the journey was last saved.
@@ -142,7 +142,7 @@ impl App {
         };
         let mut snd = Sounds::new(audio);
         snd.volume = settings.volume as f32 / 10.0;
-        let journeys = std::array::from_fn(|i| store.journey(i));
+        let journeys = std::array::from_fn(|i| store.slot(i));
         let worlds: Vec<World> = KINDS.iter().map(|&k| World::new(k)).collect();
         let w = &worlds[0];
         let mut player = Player::new(w.spawn, w.surface(w.spawn));
@@ -221,6 +221,7 @@ impl App {
             "flights" => st.flights.to_string(),
             "visited" => self.journey.visited.iter().filter(|v| **v).count().to_string(),
             "save-failed" => (self.store.failed as u8).to_string(),
+            "pulled-now" => self.world().sprouts_out().to_string(),
             _ => {
                 if let Some(p) = name.strip_prefix("score.").and_then(planet) {
                     return self.worlds[p].score.to_string();
@@ -266,7 +267,7 @@ impl App {
         }
         let ok = self.store.save_journey(slot, &self.journey);
         if ok {
-            self.journeys[slot] = Some(self.journey.clone());
+            self.journeys[slot] = Slot::Journey(self.journey.clone());
         }
         self.save_t = 0.0;
         ok
@@ -276,7 +277,7 @@ impl App {
     pub fn open_menu(&mut self, page: Page) {
         let row = match page {
             Page::Journeys => {
-                self.journeys = std::array::from_fn(|i| self.store.journey(i));
+                self.journeys = std::array::from_fn(|i| self.store.slot(i));
                 self.settings.slot
             }
             Page::Pause => {
@@ -290,7 +291,17 @@ impl App {
 
     /// Starts or continues journey `slot`.
     fn load(&mut self, slot: usize) {
-        let j = self.store.journey(slot).unwrap_or_else(Journey::start);
+        // A file that cannot be read is left alone: only deleting it, which
+        // moves it aside, frees the slot for a new journey.
+        let j = match self.store.slot(slot) {
+            Slot::Empty => Journey::start(),
+            Slot::Journey(j) => j,
+            Slot::Unreadable => {
+                self.journeys[slot] = Slot::Unreadable;
+                self.snd.play(Sfx::Land, 0.6, 0.4);
+                return;
+            }
+        };
         for (w, score) in self.worlds.iter_mut().zip(j.scores) {
             w.restore(score);
         }
@@ -315,7 +326,7 @@ impl App {
                 // Shown empty only once it is moved aside; otherwise the
                 // journeys page says the deletion failed.
                 if self.store.clear_journey(slot) {
-                    self.journeys[slot] = None;
+                    self.journeys[slot] = Slot::Empty;
                     self.snd.play(Sfx::Splash, 0.8, 0.4);
                 }
             }

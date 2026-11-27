@@ -23,6 +23,16 @@ pub const PLANETS: [&str; 3] = ["b612", "lamp", "desert"];
 const SLOT_HEADER: &str = "littleprince-journey";
 const SETTINGS_HEADER: &str = "littleprince-settings";
 
+/// What a save slot holds.
+#[derive(Clone, PartialEq, Debug)]
+pub enum Slot {
+    Empty,
+    Journey(Journey),
+    /// A file that cannot be read or is not a journey: kept as it is, never
+    /// replaced by a new journey unless it is deleted first.
+    Unreadable,
+}
+
 /// Running totals for the statistics page.
 #[derive(Clone, Default, PartialEq, Debug)]
 pub struct Stats {
@@ -248,8 +258,22 @@ impl Store {
         !self.failed
     }
 
+    /// What is in a slot: nothing, a journey, or a file that cannot be read
+    /// or is not a journey, which must not be overwritten by a new one.
+    pub fn slot(&self, slot: usize) -> Slot {
+        let Some(dir) = &self.dir else { return Slot::Empty };
+        match std::fs::read_to_string(dir.join(Self::slot_name(slot))) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Slot::Empty,
+            Err(_) => Slot::Unreadable,
+            Ok(text) => Journey::parse(&text).map_or(Slot::Unreadable, Slot::Journey),
+        }
+    }
+
     pub fn journey(&self, slot: usize) -> Option<Journey> {
-        Journey::parse(&self.read(&Self::slot_name(slot))?)
+        match self.slot(slot) {
+            Slot::Journey(j) => Some(j),
+            _ => None,
+        }
     }
 
     pub fn save_journey(&mut self, slot: usize, j: &Journey) -> bool {
@@ -385,6 +409,21 @@ mod tests {
         assert!(!store.save_journey(1, &other));
         assert!(store.failed);
         assert_eq!(store.journey(1), Some(j));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unreadable_saves_are_not_empty_slots() {
+        let dir = temp_dir("unreadable");
+        let store = Store::at(&dir);
+        assert_eq!(store.slot(0), Slot::Empty);
+        // A folder where the journey should be cannot be read as one.
+        std::fs::create_dir_all(dir.join("slot1.txt")).unwrap();
+        assert_eq!(store.slot(0), Slot::Unreadable);
+        // Nor can a file that is not a journey.
+        std::fs::write(dir.join("slot2.txt"), "meals 3\n").unwrap();
+        assert_eq!(store.slot(1), Slot::Unreadable);
+        assert_eq!(store.journey(1), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

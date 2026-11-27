@@ -91,7 +91,8 @@ pub fn parse(text: &str) -> Result<Vec<Line>, String> {
     Ok(out)
 }
 
-/// Whether `actual` passes `op value`: as numbers when both are, else as text.
+/// Whether `actual` passes `op value`: as numbers when `value` is one, else
+/// as text. A number compared with something that is not one never passes.
 pub fn holds(actual: &str, op: Op, value: &str) -> bool {
     match (actual.parse::<f64>(), value.parse::<f64>()) {
         (Ok(a), Ok(v)) => match op {
@@ -100,6 +101,7 @@ pub fn holds(actual: &str, op: Op, value: &str) -> bool {
             Op::Ge => a >= v,
             Op::Le => a <= v,
         },
+        (Err(_), Ok(_)) => false,
         _ => match op {
             Op::Eq => actual == value,
             Op::Ne => actual != value,
@@ -134,7 +136,8 @@ impl Player {
                 Cmd::Check(name, op, value) => {
                     self.checks += 1;
                     let actual = probe(name);
-                    if holds(&actual, *op, value) {
+                    // A name the game does not know is a mistake in the script.
+                    if !actual.starts_with("unknown ") && holds(&actual, *op, value) {
                         eprintln!("script: ok   line {}: {name} {op:?} {value} ({actual})", l.line);
                     } else {
                         self.failures += 1;
@@ -178,6 +181,15 @@ mod tests {
         assert!(holds("3.0", Op::Eq, "3"));
         assert!(holds("play", Op::Eq, "play"));
         assert!(holds("title", Op::Ne, "play"));
+        assert!(!holds("unknown jumpss", Op::Ge, "2"));
+        assert!(!holds("none", Op::Ne, "1"));
+    }
+
+    #[test]
+    fn checking_a_name_the_game_does_not_know_fails() {
+        let mut p = Player::new(parse("0 check jumpss >= 2\n0 check mode != play\n").unwrap());
+        p.step(0.0, &|name: &str| if name == "mode" { "title".into() } else { format!("unknown {name}") });
+        assert_eq!((p.checks, p.failures), (2, 1));
     }
 
     #[test]

@@ -219,7 +219,12 @@ fn main() {
     unsafe { ffi::CloseWindow() };
     if let Some(r) = replay {
         eprintln!("script: {} checks, {} failed", r.checks, r.failures);
-        if r.failures > 0 {
+        // Stopping early, by closing the window or LITTLEPRINCE_SECONDS,
+        // leaves checks unplayed: that is a failure too.
+        if !r.done {
+            eprintln!("script: FAIL the game stopped before the script ended");
+        }
+        if r.failures > 0 || !r.done {
             std::process::exit(1);
         }
     }
@@ -257,11 +262,11 @@ fn setup_capture(app: &mut App, c: &input::Controls) {
             j.visited = [true, true, false];
             j.scores = [7, 12, 0];
             j.stats = save::Stats { time: 1834.0, distance: 2210.0, jumps: 96, sunsets: 31, sprouts: 23, flights: 4 };
-            app.journeys[0] = Some(j.clone());
+            app.journeys[0] = save::Slot::Journey(j.clone());
             j.planet = 2;
             j.visited = [true, true, true];
             j.stats.time = 4210.0;
-            app.journeys[2] = Some(j);
+            app.journeys[2] = save::Slot::Journey(j);
             step(app, at.min(4.0));
             app.menu = Some(menu::Menu::open(menu::Page::Journeys, 0));
         }
