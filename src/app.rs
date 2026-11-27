@@ -360,12 +360,15 @@ impl App {
         self.save_now();
     }
 
-    /// A replay's `assist`: autoplay's way through the task, then a walk
-    /// to the character to talk once the task is ready.
+    /// A replay's `assist`: autoplay's way through the task, a walk to the
+    /// character to talk once the task is ready, then a wait beside them.
     fn assist_step(&mut self, dt: f32) -> (V3, bool) {
         let p = self.cur;
         let w = self.world();
-        if w.ready() && !self.journey.done[p] {
+        if self.journey.done[p] {
+            return (V3::ZERO, false);
+        }
+        if w.ready() {
             if let Some(s) = w.speaker() {
                 let to = (s - self.player.feet()).flatten(self.player.n);
                 if to.len() < TALK * 0.75 {
@@ -441,6 +444,7 @@ impl App {
                 if self.save_now() {
                     self.slot = None;
                     self.menu = None;
+                    self.dialog = None;
                     self.set_mode(Mode::Title);
                 }
             }

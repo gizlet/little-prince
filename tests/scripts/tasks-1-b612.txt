@@ -20,4 +20,17 @@
 100.0 check done.b612 = 1
 100.0 check open.lamp = 1
 100.0 check open.desert = 0
-100.5 quit
+103.5 check near = 1
+104.2 press a                # the rose again, then save and quit mid-sentence
+104.5 check dialog = rose
+104.7 press start
+105.0 check menu = pause
+105.2 press down
+105.4 press down
+105.6 press down
+105.8 press a
+106.2 check mode = title
+106.2 check dialog = none
+119.0 check autoplay = 1     # autoplay takes over without the old conversation
+119.0 check dialog = none
+119.5 quit

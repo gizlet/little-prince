@@ -22,7 +22,8 @@ pub enum Cmd {
     Press(Button, f32),
     Check(String, Op, String),
     /// Lets the traveller see to the planet's task by itself, as autoplay
-    /// does, for so many seconds; the journey still counts.
+    /// does, for so many seconds, then wait by the character who set it;
+    /// the journey still counts.
     Assist(f32),
     Quit,
 }
