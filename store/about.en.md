@@ -4,4 +4,4 @@ Start on B612, where a rose grows and volcanoes smoke. Pull up young baobabs, th
 
 Walk, jump, and turn the camera as each world moves through the day. Press X whenever you want to fly onward. Leave the title screen idle and the demo will take you around by itself.
 
-This is a small non-commercial demo inspired by Antoine de Saint-Exupéry’s story. The traveler uses Kay Lousberg’s KayKit character model.
+This is a small non-commercial demo inspired by Antoine de Saint-Exupéry’s story. The little prince is our own model, free for anyone under CC0.

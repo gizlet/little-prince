@@ -15,7 +15,7 @@ A 3D game for [Gizlet OS](https://github.com/gizlet/os) handhelds such as the R3
 ## Credits
 
 - **The story** is Antoine de Saint-Exupéry's *Le Petit Prince* (1943). The planets follow the book: B612 with its volcanoes, rose and baobab sprouts, the lamplighter's planet, and the desert where the fox is tamed. The book is in the public domain in most countries but not everywhere, and "Le Petit Prince" is a registered trademark. Keep this demo non-commercial.
-- **The hero** is the hooded Rogue from [KayKit Adventurers 1.0](https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0) by [Kay Lousberg](https://www.kaylousberg.com) (CC0, [license](assets/hero/KayKit-LICENSE.txt)). Thank you! The title screen and a corner credit during play name it.
+- **The hero** is the little prince from [gizlet/blender-models](https://github.com/gizlet/blender-models), our own rigged and animated model (CC0, [license](assets/hero/LICENSE.txt)). `assets/hero/little-prince.glb` is its game export; edit the `.blend` there and export it again with `scripts/build.py -- little-prince --game`. The title screen and a corner credit during play name it.
 - **Everything else** is written from scratch and made in code at start-up: the planets, grass, flowers, trees, rocks, the lamplighter, the fox, the biplane, the birds, particles, shaders and sound effects.
 
 ## What it shows
@@ -25,7 +25,7 @@ A 3D game for [Gizlet OS](https://github.com/gizlet/os) handhelds such as the R3
 | B612 | A planet 18 units in radius with rolling hills, a dirt path, 30,000 blades of grass parting around the hero, flowers, bushes, mossy rocks, three baobabs, smoking volcanoes, the rose under its glass, clouds and butterflies. Pull up the baobab sprouts. |
 | The lamplighter's planet | The smallest, 15 units in radius, stony and bare, where a day lasts 14 seconds. The lamplighter lights his lamp at dusk and puts it out at dawn; the HUD counts the sunsets you watch. |
 | The desert | Earth, the largest at 25 units in radius: dunes, a wheat field, a crashed biplane and a fox that comes a little closer each time you stand still. |
-| The hero | KayKit's rig with idle, walk, run, jump, landing and cheer, blended into each other and timed to the hero's speed, skinned on the GPU. |
+| The hero | The little prince's 27-bone rig with idle, walk, run, jump, landing and cheer, blended into each other and timed to the hero's speed so the feet do not slide, skinned on the CPU. |
 | The look | Toon lighting with soft shadow colours, ink outlines, a sun that circles each planet, stars and shooting stars, fog, bloom and a paper texture at the high effects level. |
 | The HUD | FPS with a frame-time graph, whole-machine and own CPU use, free and total memory, the app's memory, SoC temperature and CPU clock. |
 
@@ -68,7 +68,7 @@ Left alone on the title for 12 seconds, it plays by itself (autoplay) and moves 
 | `LITTLEPRINCE_FX=0\|1\|2` | Effects level (2 on the desktop, 1 on the handheld) |
 | `LITTLEPRINCE_SCALE=0.8` | Render the 3D scene smaller and scale it up |
 | `LITTLEPRINCE_STATS=0` | Hide the stats panel |
-| `LITTLEPRINCE_HERO=Name` | Load `assets/hero/Name.glb` instead of `Rogue_Hooded` (any KayKit Adventurers 1.0 character) |
+| `LITTLEPRINCE_HERO=Name` | Load `assets/hero/Name.glb` instead of `little-prince` (one skin of at most 64 bones, UVs into one texture, and animations named `Idle`, `Walk`, `Run`, `Jump`, `Land` and `Cheer`, or KayKit Adventurers 1.0's names) |
 | `LITTLEPRINCE_PROFILE=1` | Print the frame time per stage (waiting for the GPU after each) and the triangles drawn, every 3 seconds; `2` prints only the frame time |
 | `LITTLEPRINCE_SKIP=hero,heroink,skin,world,grass,props,flowers,backdrop,sky,alpha,glass,glow,bloom` | Leave parts out, for measuring their cost |
 | `LITTLEPRINCE_FPS=60` | Frame rate cap; `0` leaves the pace to the display |
@@ -127,7 +127,7 @@ Do not pin the GPU clock by hand: setting `min_freq` of `/sys/class/devfreq/ff40
 | `src/app.rs` | Modes, the follow camera, autoplay, flights between planets, effects from footsteps and landings, the render order |
 | `docs/design.md` | The game design and its milestones |
 | `src/world.rs` | The three planets: ground, scenery, the rose, sprouts, volcanoes, the lamplighter, the fox, the biplane, sky and stars |
-| `src/hero.rs` | Loading the KayKit model, animation blending, bone matrices |
+| `src/hero.rs` | Loading the hero model, animation blending, bone matrices, CPU skinning |
 | `src/player.rs` | Walking on a sphere, jumps, the procedural prince used when no model is found |
 | `src/gl.rs` | Shaders, materials, batching, GPU skinning, outlines, post-processing |
 | `src/mesh.rs` | Mesh building, planets, grass, cells |
@@ -147,4 +147,4 @@ Do not pin the GPU clock by hand: setting `min_freq` of `/sys/class/devfreq/ff40
 
 ## License
 
-Code under MIT, see [LICENSE](LICENSE). The hero model is CC0 ([KayKit license](assets/hero/KayKit-LICENSE.txt)). Fonts: Inter and Space Grotesk under the SIL Open Font License 1.1, Droid Sans Fallback under the Apache License 2.0 ([assets/fonts](assets/fonts)).
+Code under MIT, see [LICENSE](LICENSE). The hero model is CC0 ([license](assets/hero/LICENSE.txt)). Fonts: Inter and Space Grotesk under the SIL Open Font License 1.1, Droid Sans Fallback under the Apache License 2.0 ([assets/fonts](assets/fonts)).
