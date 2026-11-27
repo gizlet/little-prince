@@ -1,0 +1,15 @@
+# On to Earth: tame the fox, then talk to it.
+0.5 press a
+0.8 press a
+1.2 check planet = lamp
+1.4 press x
+1.7 check row = 1
+1.9 press down
+2.1 press a
+2.4 check mode = fly
+8.0 check planet = desert
+8.2 assist 70
+70.0 check score.desert = 5
+70.0 check done.desert = 1
+70.0 check dialog = none
+70.5 quit

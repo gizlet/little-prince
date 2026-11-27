@@ -8,13 +8,19 @@
 2.0 check mode = play
 2.0 check slot = 1
 2.0 check jumps >= 2
-2.2 press x                 # the birds carry him to the lamplighter
-3.0 check mode = fly
-8.0 check mode = play
-8.0 check planet = lamp
-8.0 check flights = 1
-8.0 check saved.1.planet = lamp
-8.0 check saved.1.visited = 2
+2.2 press x                 # the star map opens on the home planet
+2.5 check menu = starmap
+2.7 press down
+2.9 press a                 # the rose has not been looked after yet
+3.2 check menu = starmap
+3.2 check mode = play
+3.2 check open.lamp = 0
+3.4 press x
+3.7 check menu = none
+8.0 check planet = b612
+8.0 check flights = 0
+8.0 check saved.1.planet = b612
+8.0 check saved.1.visited = 1
 8.5 press select
 8.8 check menu = statistics
 9.0 press b
