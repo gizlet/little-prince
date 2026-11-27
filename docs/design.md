@@ -67,21 +67,26 @@ on a starry background, drawn at 640×480:
   title on its cover. A opens it.
 - **Journeys.** The first spread holds the three journeys as bookmarked
   pages: the planet the journey stopped on, its tasks and play time.
-- **Star chart.** A parchment spread with torn edges and watercolour clouds.
-  The three planets are the real planet meshes rendered small and turning
-  slowly: in colour once visited, as blue ink sketches before that, with a
-  gold ring round the current one. Dotted bird routes join them; a locked
-  route is drawn faint. Left and right move between planets.
+- **Star chart.** A parchment sheet with torn edges and watercolour clouds.
+  The three planets are the planets themselves in miniature (their coarse
+  ground and scenery in one mesh, simplified to about 5,000 to 12,500
+  triangles) turning slowly: in colour once visited, as blue ink sketches
+  before that, with a gold ring round the current one. Dotted bird routes
+  join them; a locked route is drawn faint. Left and right move between
+  planets. The paper is generated at start-up, so the book needs no images.
 - **Chapter page.** A on a planet turns the page to its chapter: the planet
   large on the left page; on the right the chapter number, the planet's
-  name, one line of story, the task's progress and "Fly there". A flies, B
-  turns back to the chart.
+  name, one line of story, the task's progress and "Fly there" (or "Stay
+  here", or why the route is still closed). A flies, left and right turn to
+  the next chapter, B turns back to the chart.
 - **Page turns.** A curled page mesh sweeps across the spread in about half a
   second; menus stay usable with no effects (level 0) by cutting instead.
 
-X during play opens the book straight on the star chart. The book is drawn
-only while it is open, so it costs nothing on a planet; while open it stays
-within the walking budget.
+X during play opens the book straight on the star chart, and closes it from
+any page. The book is drawn only while it is open, so it costs nothing on a
+planet; once it fills the screen the scene behind it is not drawn, and the
+chart costs about 23,000 triangles in 3 draw calls, a chapter about 12,000
+in one, half of walking.
 
 ## Saves and records
 
