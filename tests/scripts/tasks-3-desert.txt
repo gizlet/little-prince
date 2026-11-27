@@ -4,9 +4,11 @@
 1.2 check planet = lamp
 1.4 press x
 1.7 check row = 1
-1.9 press down
+1.9 press right              # left and right move along the chart too
 2.1 press a
-2.4 check mode = fly
+2.4 check menu = chapter
+2.6 press a
+2.9 check mode = fly
 8.0 check planet = desert
 8.2 assist 70
 70.0 check score.desert = 5

@@ -7,8 +7,11 @@
 1.4 press x
 1.7 check menu = starmap
 1.9 press down
-2.1 press a
-2.4 check mode = fly
+2.1 press a                  # the chart turns to the lamplighter's chapter
+2.4 check menu = chapter
+2.4 check row = 1
+2.6 press a
+2.9 check mode = fly
 8.0 check planet = lamp
 8.0 check mode = play
 8.2 assist 80
