@@ -1,5 +1,6 @@
-# A new journey: only B612 is open on the star map. Pulling up the seven
-# sprouts and then talking to the rose opens the route to the lamplighter.
+# A new journey: only B612 is open on the star map. Pulling up ten sprouts,
+# sweeping both volcanoes, landing on the three caterpillars and then
+# talking to the rose opens the route to the lamplighter.
 0.5 press a
 0.8 press a                  # journey 1, new
 1.2 check mode = play
@@ -22,7 +23,13 @@
 3.5 press b
 3.8 check menu = none
 3.9 assist 100
-100.0 check score.b612 = 7
+100.0 check part.b612.0 = 10       # sprouts pulled
+100.0 check part.b612.1 = 2        # volcanoes swept
+100.0 check part.b612.2 = 3        # caterpillars turned butterflies
+100.0 check score.b612 = 15
+100.0 check troubles >= 5
+100.0 check stardust >= 1
+100.0 check saved.1.score.b612 = 15
 100.0 check done.b612 = 1
 100.0 check open.lamp = 1
 100.0 check open.desert = 0
