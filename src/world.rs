@@ -582,6 +582,9 @@ pub struct World {
     rng: Rng,
     pub score: usize,
     pub total: usize,
+    /// Sprouts pulled up in the last update: the score stops at `total`,
+    /// but pulled sprouts grow back and can be pulled again.
+    pub pulled: usize,
     pub pop: f32,
 }
 
@@ -666,6 +669,7 @@ impl World {
             rng: Rng::new(kind as u64 + 3),
             score: 0,
             total: 0,
+            pulled: 0,
             pop: 0.0,
         };
         let mut props = Builder::default();
@@ -1207,6 +1211,7 @@ impl World {
                         }
                     }
                 }
+                self.pulled = pulled;
                 if pulled > 0 {
                     scored |= self.set_score((self.score + pulled).min(self.total));
                 }

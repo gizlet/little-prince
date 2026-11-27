@@ -256,17 +256,20 @@ impl App {
         self.slot.is_some() && !self.autoplay
     }
 
-    /// Writes the journey being played, if any.
-    pub fn save_now(&mut self) {
-        let Some(slot) = self.slot else { return };
+    /// Writes the journey being played, if any; whether that worked.
+    pub fn save_now(&mut self) -> bool {
+        let Some(slot) = self.slot else { return true };
         self.journey.planet = self.cur;
         self.journey.visited[self.cur] = true;
         for (score, w) in self.journey.scores.iter_mut().zip(&self.worlds) {
             *score = w.score;
         }
-        self.store.save_journey(slot, &self.journey);
-        self.journeys[slot] = Some(self.journey.clone());
+        let ok = self.store.save_journey(slot, &self.journey);
+        if ok {
+            self.journeys[slot] = Some(self.journey.clone());
+        }
         self.save_t = 0.0;
+        ok
     }
 
     /// Opens a menu page; the pause menu saves first.
@@ -313,11 +316,14 @@ impl App {
                 self.journeys[slot] = None;
                 self.snd.play(Sfx::Splash, 0.8, 0.4);
             }
+            // Only once the journey is safely written: otherwise the pause
+            // menu stays, telling why, with the journey still in play.
             Action::SaveAndQuit => {
-                self.save_now();
-                self.slot = None;
-                self.menu = None;
-                self.set_mode(Mode::Title);
+                if self.save_now() {
+                    self.slot = None;
+                    self.menu = None;
+                    self.set_mode(Mode::Title);
+                }
             }
             Action::Change(setting, step) => self.change(setting, step),
         }
@@ -457,6 +463,14 @@ impl App {
             if self.autoplay {
                 self.autoplay = false;
                 input = false;
+                // Taking over from autoplay starts from a journey, so that
+                // what follows is saved.
+                if self.slot.is_none() {
+                    let cur = self.cur;
+                    self.arrive_at(cur, 0.0);
+                    self.set_mode(Mode::Title);
+                    self.open_menu(Page::Journeys);
+                }
             }
         } else {
             self.idle_t += dt;
@@ -582,7 +596,6 @@ impl App {
             h.update(dt, &motion);
         }
         let ps = PState { feet: self.player.feet(), face: self.player.face, speed: sp };
-        let before = self.worlds[self.cur].score;
         let scored = self.worlds[self.cur].update(dt, t, &ps, &mut self.fx, &mut self.snd);
         if scored {
             self.player.cheer = 1.0;
@@ -592,10 +605,7 @@ impl App {
         let sunset = self.mode == Mode::Play && self.sun_e > 0.0 && e <= 0.0;
         self.sun_e = e;
         if self.counting() {
-            let w = &self.worlds[self.cur];
-            if w.kind == Kind::B612 && w.score > before {
-                self.journey.stats.sprouts += (w.score - before) as u32;
-            }
+            self.journey.stats.sprouts += self.worlds[self.cur].pulled as u32;
             if sunset {
                 self.journey.stats.sunsets += 1;
             }

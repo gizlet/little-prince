@@ -224,9 +224,10 @@ impl Store {
         std::fs::read_to_string(self.dir.as_ref()?.join(name)).ok()
     }
 
-    /// Writes `text` to a temporary file next to `name`, then renames it.
-    fn write(&mut self, name: &str, text: &str) {
-        let Some(dir) = &self.dir else { return };
+    /// Writes `text` to a temporary file next to `name`, then renames it;
+    /// whether it was written (or there is nowhere to write).
+    fn write(&mut self, name: &str, text: &str) -> bool {
+        let Some(dir) = &self.dir else { return true };
         let ok = (|| -> std::io::Result<()> {
             std::fs::create_dir_all(dir)?;
             let tmp = dir.join(format!("{name}.tmp"));
@@ -242,14 +243,15 @@ impl Store {
             eprintln!("littleprince: could not save {name}: {e}");
         }
         self.failed = ok.is_err();
+        !self.failed
     }
 
     pub fn journey(&self, slot: usize) -> Option<Journey> {
         Journey::parse(&self.read(&Self::slot_name(slot))?)
     }
 
-    pub fn save_journey(&mut self, slot: usize, j: &Journey) {
-        self.write(&Self::slot_name(slot), &j.render());
+    pub fn save_journey(&mut self, slot: usize, j: &Journey) -> bool {
+        self.write(&Self::slot_name(slot), &j.render())
     }
 
     /// Moves a journey out of the way rather than deleting it: renamed to
@@ -368,7 +370,7 @@ mod tests {
         std::fs::create_dir_all(dir.join("slot2.txt.tmp")).unwrap();
         let mut other = j.clone();
         other.planet = 2;
-        store.save_journey(1, &other);
+        assert!(!store.save_journey(1, &other));
         assert!(store.failed);
         assert_eq!(store.journey(1), Some(j));
         let _ = std::fs::remove_dir_all(&dir);
