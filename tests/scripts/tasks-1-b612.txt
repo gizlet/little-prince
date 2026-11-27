@@ -9,13 +9,19 @@
 1.4 press x
 1.7 check menu = starmap
 1.7 check row = 0
+1.85 check book = 1           # the book has opened over the planet
 1.9 press down
-2.1 press a                  # the lamplighter: no route yet
-2.4 check menu = starmap
-2.4 check mode = play
-2.6 press b
-2.9 check menu = none
-3.0 assist 100
+2.1 press a                  # the lamplighter's chapter: no route yet
+2.4 check menu = chapter
+2.6 press a
+2.9 check menu = chapter
+2.9 check mode = play
+3.0 press b                  # back to the chart, then the book closes
+3.3 check menu = starmap
+3.3 check row = 1
+3.5 press b
+3.8 check menu = none
+3.9 assist 100
 100.0 check score.b612 = 7
 100.0 check done.b612 = 1
 100.0 check open.lamp = 1

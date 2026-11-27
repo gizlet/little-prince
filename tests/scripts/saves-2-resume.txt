@@ -11,12 +11,14 @@
 2.2 press x                 # the star map opens on the home planet
 2.5 check menu = starmap
 2.7 press down
-2.9 press a                 # the rose has not been looked after yet
-3.2 check menu = starmap
-3.2 check mode = play
-3.2 check open.lamp = 0
-3.4 press x
-3.7 check menu = none
+2.9 press a                 # the lamplighter's chapter
+3.2 check menu = chapter
+3.3 press a                 # the rose has not been looked after yet
+3.6 check menu = chapter
+3.6 check mode = play
+3.6 check open.lamp = 0
+3.8 press x                 # X closes the book from any page
+4.1 check menu = none
 8.0 check planet = b612
 8.0 check flights = 0
 8.0 check saved.1.planet = b612

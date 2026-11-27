@@ -26,6 +26,7 @@
 //!   otherwise); captures save nothing.
 
 mod app;
+mod book;
 mod dialog;
 #[cfg(all(target_os = "linux", feature = "gizlet-os"))]
 mod evdev;
@@ -165,18 +166,22 @@ fn main() {
         prof::mark("update");
         let (dest, k) = view();
         let direct = app.gl.direct(app.fx_level);
-        if !direct {
+        // Behind an open book there is nothing to draw.
+        let covered = app.hud && app.book_covers();
+        if !direct && !covered {
             app.render(false);
         }
         if app.hud {
             hud::prepare(&app, k);
+            book::prepare(&app, k);
         }
         prof::mark("hud-prepare");
         unsafe {
             ffi::BeginDrawing();
             ffi::ClearBackground(gl::rgb(0x000000));
         }
-        if direct {
+        if covered {
+        } else if direct {
             app.render(true);
         } else {
             app.present(dest);
@@ -243,7 +248,7 @@ fn setup_capture(app: &mut App, c: &input::Controls) {
         }
     };
     match scene.as_str() {
-        "title" => step(app, at.min(6.0)),
+        "title" | "cover" => step(app, at.min(6.0)),
         "icon" => {
             app.hud = false;
             step(app, 3.0);
@@ -288,7 +293,7 @@ fn setup_capture(app: &mut App, c: &input::Controls) {
             };
             app.menu = Some(menu::Menu::open(page, 0));
         }
-        "starmap" | "dialog" => {
+        "starmap" | "chapter" | "turn" | "dialog" => {
             // Journey 1 on the lamplighter's planet with B612's task done for
             // the map; by the rose, as the task begins, for the conversation.
             app.autoplay = true;
@@ -300,6 +305,11 @@ fn setup_capture(app: &mut App, c: &input::Controls) {
             app.journey.done = [true, false, false];
             if scene == "starmap" {
                 app.menu = Some(menu::Menu::open(menu::Page::StarMap, 2));
+            } else if scene == "chapter" || scene == "turn" {
+                // B612's chapter, turned to from the chart.
+                let mut m = menu::Menu::open(menu::Page::StarMap, 0);
+                m.step(menu::Keys { a: true, ..Default::default() });
+                app.menu = Some(m);
             } else {
                 app.journey.done = [false; 3];
                 let mut d = dialog::Dialog::with(world::Kind::B612, 0, false, false);
@@ -323,5 +333,11 @@ fn setup_capture(app: &mut App, c: &input::Controls) {
             assert!(app.mode != Mode::Title);
         }
         other => eprintln!("littleprince: unknown scene {other}"),
+    }
+    let top = app.menu.as_ref().map(|m| m.top());
+    app.book.settle(top);
+    if scene == "turn" {
+        // Halfway through turning from the chart to the chapter.
+        app.book.turn = 0.42;
     }
 }
