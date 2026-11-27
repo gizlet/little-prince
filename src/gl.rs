@@ -415,7 +415,6 @@ void main() {
 }
 "#;
 
-
 const OUTLINE_VS: &str = r#"
 attribute vec3 vertexPosition;
 attribute vec3 vertexNormal;
@@ -769,7 +768,13 @@ impl Gl {
     pub fn surface(&self, mesh: Mesh, lod: &'static str) {
         if mesh.vertexCount > 0 {
             self.parts.borrow_mut().push(Part {
-                surface_lod: Some(lod), rig: None, mesh, m: crate::math::identity(), c: rgb(0xFFFFFF), e: 0.0, ink: Ink::None,
+                surface_lod: Some(lod),
+                rig: None,
+                mesh,
+                m: crate::math::identity(),
+                c: rgb(0xFFFFFF),
+                e: 0.0,
+                ink: Ink::None,
             });
         }
     }
@@ -798,7 +803,9 @@ impl Gl {
     /// Whether the 3D scene can be drawn straight to a 640×480 screen,
     /// skipping the scene texture and the full-screen copy out of it.
     pub fn direct(&self, level: u8) -> bool {
-        level < 2 && self.scene.texture.width == W && unsafe { ffi::GetRenderWidth() == W && ffi::GetRenderHeight() == H }
+        level < 2
+            && self.scene.texture.width == W
+            && unsafe { ffi::GetRenderWidth() == W && ffi::GetRenderHeight() == H }
     }
 
     /// Registers the batched unit shapes (see `Kit`).
@@ -846,7 +853,13 @@ impl Gl {
             mesh.vertexCount = r.per * count;
             mesh.triangleCount = r.per_tris * count;
             unsafe {
-                ffi::SetShaderValueV(u.shader, u.loc("bones"), bones.as_ptr() as _, ffi::ShaderUniformDataType::SHADER_UNIFORM_VEC4 as i32, count * 4);
+                ffi::SetShaderValueV(
+                    u.shader,
+                    u.loc("bones"),
+                    bones.as_ptr() as _,
+                    ffi::ShaderUniformDataType::SHADER_UNIFORM_VEC4 as i32,
+                    count * 4,
+                );
             }
             self.submit(mesh, mat, crate::math::identity(), None);
         }
@@ -883,7 +896,12 @@ impl Gl {
                 self.submit(p.mesh, self.outline_mat, p.m, None);
             }
             for (k, r) in rigs.iter().enumerate() {
-                self.draw_rig(r, parts.iter().filter(|p| p.rig == Some(k) && p.ink != Ink::None), &self.rig_outline, self.rig_outline_mat);
+                self.draw_rig(
+                    r,
+                    parts.iter().filter(|p| p.rig == Some(k) && p.ink != Ink::None),
+                    &self.rig_outline,
+                    self.rig_outline_mat,
+                );
             }
             unsafe { ffi::rlSetCullFace(ffi::rlCullMode::RL_CULL_FACE_BACK as i32) };
         }
@@ -929,7 +947,9 @@ impl Gl {
                 ffi::DrawTexturePro(self.scene.texture, flip(&self.scene), full, origin, 0.0, white);
                 ffi::EndShaderMode();
                 ffi::EndTextureMode();
-                for (i, d) in [[1.0 / sw, 0.0], [0.0, 1.0 / sh], [2.0 / sw, 0.0], [0.0, 2.0 / sh]].into_iter().enumerate() {
+                for (i, d) in
+                    [[1.0 / sw, 0.0], [0.0, 1.0 / sh], [2.0 / sw, 0.0], [0.0, 2.0 / sh]].into_iter().enumerate()
+                {
                     let (src, dst) = (&self.small[i % 2], self.small[(i + 1) % 2]);
                     ffi::BeginTextureMode(dst);
                     ffi::BeginShaderMode(self.blur.shader);
@@ -981,7 +1001,9 @@ impl Sprites {
     pub fn quad(c: V3, a: V3, b: V3, col: Color) {
         unsafe {
             ffi::rlColor4ub(col.r, col.g, col.b, col.a);
-            for (p, (u, v)) in [(c - a - b, (0.0, 0.0)), (c - a + b, (0.0, 1.0)), (c + a + b, (1.0, 1.0)), (c + a - b, (1.0, 0.0))] {
+            for (p, (u, v)) in
+                [(c - a - b, (0.0, 0.0)), (c - a + b, (0.0, 1.0)), (c + a + b, (1.0, 1.0)), (c + a - b, (1.0, 0.0))]
+            {
                 ffi::rlTexCoord2f(u, v);
                 ffi::rlVertex3f(p.x, p.y, p.z);
             }

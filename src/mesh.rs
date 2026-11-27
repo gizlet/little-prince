@@ -74,7 +74,8 @@ impl Builder {
             }
             key[6] = self.uv[v * 2].to_bits();
             key[7] = self.uv[v * 2 + 1].to_bits();
-            key[8] = u32::from_le_bytes([self.col[v * 4], self.col[v * 4 + 1], self.col[v * 4 + 2], self.col[v * 4 + 3]]);
+            key[8] =
+                u32::from_le_bytes([self.col[v * 4], self.col[v * 4 + 1], self.col[v * 4 + 2], self.col[v * 4 + 3]]);
             let id = match seen.get(&key) {
                 Some(&id) => id,
                 None => {
@@ -96,7 +97,11 @@ impl Builder {
     }
 
     pub fn tris(&self) -> usize {
-        if self.idx.is_empty() { self.pos.len() / 9 } else { self.idx.len() / 3 }
+        if self.idx.is_empty() {
+            self.pos.len() / 9
+        } else {
+            self.idx.len() / 3
+        }
     }
 
     /// `n` copies of this shape, copy `i` tagged with `u = i` (see `gl::Rig`).
@@ -133,6 +138,115 @@ impl Builder {
             }
             ffi::UploadMesh(&mut m, false);
             m
+        }
+    }
+}
+
+impl Builder {
+    /// Uploads a mesh that never changes and keeps only its indices on the
+    /// CPU: raylib draws from the GPU buffers and needs the indices pointer
+    /// only to know the mesh is indexed.
+    pub fn upload_static(self) -> Mesh {
+        let mut m = self.upload();
+        unsafe {
+            for p in [&mut m.vertices, &mut m.normals, &mut m.texcoords] {
+                ffi::MemFree(*p as *mut _);
+                *p = std::ptr::null_mut();
+            }
+            ffi::MemFree(m.colors as *mut _);
+            m.colors = std::ptr::null_mut();
+        }
+        m
+    }
+}
+
+impl Builder {
+    /// Uploads these indexed vertices once, for a cell's four levels of
+    /// detail. `far`, `near` and `close` draw the first `counts` triangles of
+    /// the index list, so they share one mesh but for its triangle count;
+    /// `mid`, if given, has its own index list over the same vertices.
+    ///
+    /// With vertex array objects the vertices go in one interleaved buffer;
+    /// without them raylib binds the buffers named in `vboId` itself, so each
+    /// attribute gets its own.
+    fn upload_cell(&self, counts: [usize; 3], mid: Option<&[u16]>) -> [Mesh; 4] {
+        let n = self.pos.len() / 3;
+        let [far_n, near_n, close_n] = counts;
+        if n == 0 || close_n == 0 {
+            return unsafe { std::mem::zeroed() };
+        }
+        unsafe {
+            let vao = ffi::rlLoadVertexArray();
+            let mut ids = [0u32; 4];
+            let attribs: [(u32, i32, u32, bool, i32); 4] = [
+                (0, 3, ffi::RL_FLOAT, false, 0),
+                (2, 3, ffi::RL_FLOAT, false, 12),
+                (1, 2, ffi::RL_FLOAT, false, 24),
+                (3, 4, ffi::RL_UNSIGNED_BYTE, true, 32),
+            ];
+            const STRIDE: usize = 36;
+            if vao > 0 {
+                let mut data = Vec::with_capacity(n * STRIDE);
+                for v in 0..n {
+                    for x in &self.pos[v * 3..v * 3 + 3] {
+                        data.extend(x.to_ne_bytes());
+                    }
+                    for x in &self.nrm[v * 3..v * 3 + 3] {
+                        data.extend(x.to_ne_bytes());
+                    }
+                    for x in &self.uv[v * 2..v * 2 + 2] {
+                        data.extend(x.to_ne_bytes());
+                    }
+                    data.extend(&self.col[v * 4..v * 4 + 4]);
+                }
+                ids[0] = ffi::rlLoadVertexBuffer(data.as_ptr() as *const _, data.len() as i32, false);
+            } else {
+                ids[0] = ffi::rlLoadVertexBuffer(self.pos.as_ptr() as *const _, (self.pos.len() * 4) as i32, false);
+                ids[1] = ffi::rlLoadVertexBuffer(self.uv.as_ptr() as *const _, (self.uv.len() * 4) as i32, false);
+                ids[2] = ffi::rlLoadVertexBuffer(self.nrm.as_ptr() as *const _, (self.nrm.len() * 4) as i32, false);
+                ids[3] = ffi::rlLoadVertexBuffer(self.col.as_ptr() as *const _, self.col.len() as i32, false);
+            }
+            // A vertex array object for an index list, or a bare index buffer
+            // without them; and the buffer ids raylib looks the buffers up in.
+            let level = |idx: &[u16], vao: u32| -> Mesh {
+                let mut m: Mesh = std::mem::zeroed();
+                m.vertexCount = n as i32;
+                m.triangleCount = (idx.len() / 3) as i32;
+                m.vaoId = vao;
+                if vao > 0 {
+                    ffi::rlEnableVertexArray(vao);
+                    ffi::rlEnableVertexBuffer(ids[0]);
+                    for (loc, size, ty, norm, offset) in attribs {
+                        ffi::rlSetVertexAttribute(loc, size, ty as i32, norm, STRIDE as i32, offset);
+                        ffi::rlEnableVertexAttribute(loc);
+                    }
+                }
+                let ebo = ffi::rlLoadVertexBufferElement(idx.as_ptr() as *const _, (idx.len() * 2) as i32, false);
+                if vao > 0 {
+                    ffi::rlDisableVertexArray();
+                }
+                ffi::rlDisableVertexBuffer();
+                ffi::rlDisableVertexBufferElement();
+                // Room for every buffer raylib may look up, whatever its build.
+                let vbo = ffi::MemAlloc((9 * std::mem::size_of::<u32>()) as u32) as *mut u32;
+                std::ptr::write_bytes(vbo, 0, 9);
+                for (k, id) in ids.iter().enumerate() {
+                    *vbo.add(k) = *id;
+                }
+                *vbo.add(ffi::RL_DEFAULT_SHADER_ATTRIB_LOCATION_INDICES as usize) = ebo;
+                m.vboId = vbo;
+                // raylib draws by index whenever `indices` is set; it does
+                // not read them, the index buffer holds them.
+                m.indices = copy(&[0u16]);
+                m
+            };
+            let close = level(&self.idx[..close_n * 3], vao);
+            let with = |count: usize| Mesh { triangleCount: count as i32, ..close };
+            let mid = match mid {
+                Some(idx) if !idx.is_empty() => level(idx, if vao > 0 { ffi::rlLoadVertexArray() } else { 0 }),
+                _ => with(far_n),
+            };
+            [with(far_n), mid, with(near_n), close]
         }
     }
 }
@@ -181,7 +295,13 @@ pub fn cluster(pos: &[f32], idx: &[u16], cell: f32) -> Vec<u16> {
             continue;
         }
         // The same triangle twice (in any rotation) is drawn once.
-        let k = if a < b && a < c { [a, b, c] } else if b < c { [b, c, a] } else { [c, a, b] };
+        let k = if a < b && a < c {
+            [a, b, c]
+        } else if b < c {
+            [b, c, a]
+        } else {
+            [c, a, b]
+        };
         if seen.insert(k) {
             out.extend_from_slice(&[a, b, c]);
         }
@@ -243,8 +363,14 @@ pub fn icosphere(n: u32) -> Vec<[V3; 3]> {
     faces
 }
 
+/// How finely a planet's ground is built near the camera, and for groups of
+/// cells far away.
+pub const GROUND_SUBDIV: u32 = 6;
+pub const COARSE_SUBDIV: u32 = 4;
+
 /// A planet's ground: the unit sphere pushed out to `height`, smooth-shaded,
-/// coloured per vertex by `colour(direction, height)` (colour, glow).
+/// coloured per vertex by `colour(direction, height)` (colour, glow). Its
+/// triangles come in the order of `icosphere(subdiv)`'s faces.
 pub fn planet(subdiv: u32, height: &dyn Fn(V3) -> f32, colour: &dyn Fn(V3, f32) -> (Color, f32)) -> Builder {
     let normal = |u: V3| {
         let t1 = any_perp(u);
@@ -283,7 +409,15 @@ pub fn planet(subdiv: u32, height: &dyn Fn(V3) -> f32, colour: &dyn Fn(V3, f32) 
 }
 
 /// An ellipsoid at `c` with the three semi-axes `axes` (as vectors).
-pub fn ellipsoid(b: &mut Builder, c: V3, axes: [V3; 3], subdiv: u32, col: &dyn Fn(V3) -> Color, sway: Sway, smooth: bool) {
+pub fn ellipsoid(
+    b: &mut Builder,
+    c: V3,
+    axes: [V3; 3],
+    subdiv: u32,
+    col: &dyn Fn(V3) -> Color,
+    sway: Sway,
+    smooth: bool,
+) {
     if let Some(lo) = b.lo.as_deref_mut() {
         ellipsoid(lo, c, axes, subdiv.saturating_sub(1), col, sway, smooth);
     }
@@ -303,7 +437,16 @@ pub fn ellipsoid(b: &mut Builder, c: V3, axes: [V3; 3], subdiv: u32, col: &dyn F
 /// A smooth ring-to-ring section along `up` from (`y0`, `r0`) to (`y1`,
 /// `r1`); a zero `r1` makes a cone. `cap` closes the ends.
 #[allow(clippy::too_many_arguments)]
-pub fn frustum(b: &mut Builder, base: V3, up: V3, sides: usize, seg: (f32, f32, f32, f32), col: Color, sway: Sway, cap: bool) {
+pub fn frustum(
+    b: &mut Builder,
+    base: V3,
+    up: V3,
+    sides: usize,
+    seg: (f32, f32, f32, f32),
+    col: Color,
+    sway: Sway,
+    cap: bool,
+) {
     if let Some(lo) = b.lo.as_deref_mut() {
         frustum(lo, base, up, (sides / 2).max(3), seg, col, sway, cap);
     }
@@ -363,13 +506,57 @@ pub fn cuboid(b: &mut Builder, c: V3, axes: [V3; 3], col: Color) {
 /// Blades of grass over the ground, avoiding directions where `keep` is
 /// false. Each blade is two crossed triangles; `u` is the sway weight, `v` a
 /// phase. Normals point up from the planet so blades light like the ground.
-pub fn grass(rng: &mut Rng, count: usize, height: &dyn Fn(V3) -> f32, keep: &dyn Fn(V3) -> bool, size: (f32, f32), palette: &[Color]) -> Builder {
+pub fn grass(
+    rng: &mut Rng,
+    count: usize,
+    height: &dyn Fn(V3) -> f32,
+    keep: &dyn Fn(V3) -> bool,
+    size: (f32, f32),
+    palette: &[Color],
+) -> Builder {
+    grass_from(rng, count, &mut |rng| rng.dir(), height, keep, size, palette)
+}
+
+/// Blades of grass like `grass`, only within `area` (a direction and an
+/// angle round it), so a small field fills up without sampling the whole
+/// planet.
+pub fn grass_in(
+    rng: &mut Rng,
+    count: usize,
+    area: (V3, f32),
+    height: &dyn Fn(V3) -> f32,
+    keep: &dyn Fn(V3) -> bool,
+    size: (f32, f32),
+    palette: &[Color],
+) -> Builder {
+    let (centre, ang) = area;
+    let (t1, t2) = (any_perp(centre), centre.cross(any_perp(centre)));
+    let lo = ang.cos();
+    let mut sample = |rng: &mut Rng| {
+        // Uniform over the spherical cap: uniform in height along `centre`.
+        let z = rng.range(lo, 1.0);
+        let a = rng.range(0.0, TAU);
+        let r = (1.0 - z * z).max(0.0).sqrt();
+        (centre * z + (t1 * a.cos() + t2 * a.sin()) * r).norm()
+    };
+    grass_from(rng, count, &mut sample, height, keep, size, palette)
+}
+
+fn grass_from(
+    rng: &mut Rng,
+    count: usize,
+    sample: &mut dyn FnMut(&mut Rng) -> V3,
+    height: &dyn Fn(V3) -> f32,
+    keep: &dyn Fn(V3) -> bool,
+    size: (f32, f32),
+    palette: &[Color],
+) -> Builder {
     let mut b = Builder::default();
     let mut placed = 0;
     let mut tries = 0;
     while placed < count && tries < count * 40 {
         tries += 1;
-        let c = rng.dir();
+        let c = sample(rng);
         if !keep(c) {
             continue;
         }
@@ -407,7 +594,7 @@ pub fn grass(rng: &mut Rng, count: usize, height: &dyn Fn(V3) -> f32, keep: &dyn
     b
 }
 
-/// One of 80 cells of a planet, holding everything static in it at four
+/// One of 320 cells of a planet, holding everything static in it at four
 /// levels of detail, each a single mesh and so a single draw call: `close`
 /// has the ground, the full scenery, flowers and all the grass; `near` the
 /// same with every other blade of grass; `mid` the ground and the coarser
@@ -418,35 +605,160 @@ pub struct Tile {
     pub dir: V3,
     /// The angle from `dir` to the cell's farthest vertex.
     pub ang: f32,
+    /// The distance from the planet's centre to the cell's highest vertex.
+    pub top: f32,
+    /// The distance from the planet's centre to the cell's lowest ground.
+    pub low: f32,
+    /// The `Group` this cell is one of.
+    pub group: usize,
     pub close: Mesh,
     pub near: Mesh,
     pub mid: Mesh,
     pub far: Mesh,
 }
 
+/// Four neighbouring cells in one mesh, drawn instead of the four when they
+/// are all some way off: from high above or over hills, many cells are in
+/// view and each would be a draw call of its own. `mid` has the ground and
+/// the coarser scenery, `far` the ground alone.
+pub struct Group {
+    pub mid: Mesh,
+    pub far: Mesh,
+}
+
+/// Finds the nearest of the cell directions quickly: first the nearest of
+/// the 80 coarse directions, then only the cells that can be nearest to a
+/// point there.
+struct CellFinder {
+    coarse: Vec<V3>,
+    candidates: Vec<Vec<usize>>,
+    cells: Vec<V3>,
+    /// The coarse direction each cell lies in.
+    parent: Vec<usize>,
+}
+
+impl CellFinder {
+    fn new() -> CellFinder {
+        let reach = |faces: &[[V3; 3]]| {
+            faces
+                .iter()
+                .map(|f| {
+                    let c = (f[0] + f[1] + f[2]).norm();
+                    f.iter().map(|v| v.dot(c).clamp(-1.0, 1.0).acos()).fold(0.0, f32::max)
+                })
+                .fold(0.0, f32::max)
+        };
+        let coarse_faces = icosphere(1);
+        let cell_faces = icosphere(2);
+        let centre = |f: &[V3; 3]| (f[0] + f[1] + f[2]).norm();
+        let coarse: Vec<V3> = coarse_faces.iter().map(centre).collect();
+        let cells: Vec<V3> = cell_faces.iter().map(centre).collect();
+        // A point lies within `reach` of its nearest centre at either level,
+        // so its nearest cell lies within both reaches of its nearest coarse
+        // direction.
+        let limit = (reach(&coarse_faces) + reach(&cell_faces) + 0.01).cos();
+        let candidates =
+            coarse.iter().map(|c| (0..cells.len()).filter(|&i| cells[i].dot(*c) >= limit).collect()).collect();
+        let mut finder = CellFinder { coarse, candidates, cells, parent: Vec::new() };
+        // Each face of `icosphere(2)` is one of the four `icosphere(1)` splits
+        // its parent into, in order.
+        finder.parent = (0..finder.cells.len()).map(|j| j / 4).collect();
+        finder
+    }
+
+    fn nearest_coarse(&self, p: V3) -> usize {
+        (0..self.coarse.len()).max_by(|&a, &b| self.coarse[a].dot(p).total_cmp(&self.coarse[b].dot(p))).unwrap_or(0)
+    }
+
+    fn nearest(&self, p: V3) -> usize {
+        let by = |dirs: &[V3], a: usize, b: usize| dirs[a].dot(p).total_cmp(&dirs[b].dot(p));
+        let k = self.nearest_coarse(p);
+        self.candidates[k].iter().copied().max_by(|&a, &b| by(&self.cells, a, b)).unwrap_or(0)
+    }
+}
+
 impl Builder {
-    /// Splits the (unindexed) triangles by which of the 80 cell directions
-    /// their centre is nearest; always 80 builders, some empty.
-    fn cells(self, centers: &[V3]) -> Vec<Builder> {
-        let mut parts: Vec<Builder> = vec![Builder::default(); centers.len()];
+    /// Splits the (unindexed) triangles by which cell direction their centre
+    /// is nearest; always one builder per cell, some empty.
+    fn cells(self, finder: &CellFinder) -> Vec<Builder> {
+        let mut parts: Vec<Builder> = vec![Builder::default(); finder.cells.len()];
         let at = |v: usize| v3(self.pos[v * 3], self.pos[v * 3 + 1], self.pos[v * 3 + 2]);
         for t in 0..self.pos.len() / 9 {
             let c = (at(t * 3) + at(t * 3 + 1) + at(t * 3 + 2)).norm();
-            let i = (0..centers.len()).max_by(|&a, &b| centers[a].dot(c).total_cmp(&centers[b].dot(c))).unwrap_or(0);
-            parts[i].append_vertices(&self, t * 3, 3);
+            parts[finder.nearest(c)].append_vertices(&self, t * 3, 3);
         }
         parts
     }
 
-    /// Append every other double-sided grass blade, keeping both triangles.
-    fn append_thinned_grass(&mut self, grass: &Builder) {
-        for first in (0..grass.pos.len() / 3).step_by(12) {
-            let count = (grass.pos.len() / 3 - first).min(6);
-            self.append_vertices(grass, first, count);
+    /// Splits ground made by `planet(subdiv, ..)` by the face of
+    /// `icosphere(level)` each triangle lies in: `icosphere` splits every
+    /// face into four in order, so triangle `t` lies in face
+    /// `t >> 2 * (subdiv - level)`. Ground of any subdivision split this way
+    /// has exactly the same boundaries.
+    fn by_face(self, subdiv: u32, level: u32) -> Vec<Builder> {
+        let shift = 2 * (subdiv - level);
+        let mut parts: Vec<Builder> = vec![Builder::default(); 20 << (2 * level)];
+        for t in 0..self.pos.len() / 9 {
+            parts[t >> shift].append_vertices(&self, t * 3, 3);
         }
+        parts
     }
 
-    fn append(&mut self, other: &Builder) {
+    /// Adds a strip hanging `depth` towards the centre from every open edge
+    /// of these (unindexed) triangles, seen from both sides: it fills the
+    /// slivers where this coarser ground meets finer ground next to it.
+    fn with_skirt(mut self, depth: f32) -> Builder {
+        let key = |v: usize| [self.pos[v * 3].to_bits(), self.pos[v * 3 + 1].to_bits(), self.pos[v * 3 + 2].to_bits()];
+        // Each edge by its two corners: its first two vertices and how many
+        // triangles share it.
+        type Corner = [u32; 3];
+        let mut edges: std::collections::HashMap<(Corner, Corner), (usize, usize, u32)> = Default::default();
+        for t in 0..self.pos.len() / 9 {
+            for (a, b) in [(0, 1), (1, 2), (2, 0)] {
+                let (a, b) = (t * 3 + a, t * 3 + b);
+                let (ka, kb) = (key(a), key(b));
+                let k = if ka < kb { (ka, kb) } else { (kb, ka) };
+                edges.entry(k).or_insert((a, b, 0)).2 += 1;
+            }
+        }
+        let mut open: Vec<(usize, usize)> = edges.into_values().filter(|e| e.2 == 1).map(|e| (e.0, e.1)).collect();
+        open.sort_unstable();
+        let vertex = |b: &Builder, v: usize| {
+            let p = v3(b.pos[v * 3], b.pos[v * 3 + 1], b.pos[v * 3 + 2]);
+            let n = v3(b.nrm[v * 3], b.nrm[v * 3 + 1], b.nrm[v * 3 + 2]);
+            let c = Color { r: b.col[v * 4], g: b.col[v * 4 + 1], b: b.col[v * 4 + 2], a: b.col[v * 4 + 3] };
+            (p, n, (b.uv[v * 2], b.uv[v * 2 + 1]), c)
+        };
+        for (a, b) in open {
+            let (pa, na, ua, ca) = vertex(&self, a);
+            let (pb, nb, ub, cb) = vertex(&self, b);
+            let (la, lb) = (pa - pa.norm() * depth, pb - pb.norm() * depth);
+            for quad in [[(pa, na, ua, ca), (pb, nb, ub, cb), (lb, nb, ub, cb), (la, na, ua, ca)]] {
+                for [i, j, k] in [[0, 1, 2], [0, 2, 3], [0, 2, 1], [0, 3, 2]] {
+                    for v in [quad[i], quad[j], quad[k]] {
+                        self.push(v.0, v.1, v.2, v.3);
+                    }
+                }
+            }
+        }
+        self
+    }
+
+    /// Splits double-sided grass blades (12 vertices each) into every other
+    /// blade and the rest, so the thinned half can be drawn on its own.
+    fn split_grass(&self) -> (Builder, Builder) {
+        let (mut kept, mut rest) = (Builder::default(), Builder::default());
+        let n = self.pos.len() / 3;
+        for first in (0..n).step_by(12) {
+            kept.append_vertices(self, first, (n - first).min(6));
+            if first + 6 < n {
+                rest.append_vertices(self, first + 6, (n - first - 6).min(6));
+            }
+        }
+        (kept, rest)
+    }
+
+    pub fn append(&mut self, other: &Builder) {
         self.append_vertices(other, 0, other.pos.len() / 3);
     }
 
@@ -459,10 +771,7 @@ impl Builder {
     }
 }
 
-fn cell_dirs() -> Vec<V3> {
-    icosphere(1).iter().map(|f| (f[0] + f[1] + f[2]).norm()).collect()
-}
-
+#[derive(Clone, Copy)]
 pub struct TileLayers {
     pub props: bool,
     pub flowers: bool,
@@ -470,35 +779,133 @@ pub struct TileLayers {
 }
 
 /// Builds the planet's tiles from unindexed layers in world space.
-pub fn tiles([ground, props, props_lo, flowers, grass]: [Builder; 5], layers: TileLayers) -> Vec<Tile> {
-    let dirs = cell_dirs();
-    let mut cells = [ground, props, props_lo, flowers, grass].map(|layer| layer.cells(&dirs).into_iter());
-    let mut out = Vec::with_capacity(dirs.len());
-    for dir in dirs {
-        let [g, p, l, d, s] = cells.each_mut().map(|layer| layer.next().unwrap());
+/// `coarse_ground` is the same ground built coarser, for groups of cells far
+/// away.
+pub fn tiles(
+    [ground, props, props_lo, flowers, grass]: [Builder; 5],
+    coarse_ground: Builder,
+    layers: TileLayers,
+) -> (Vec<Tile>, Vec<Group>) {
+    let finder = CellFinder::new();
+    // The ground splits along the faces it was built from, at both levels of
+    // detail, so a group drawn coarse covers exactly the cells it replaces.
+    let coarse_ground = coarse_ground.by_face(COARSE_SUBDIV, 1);
+    let ground = ground.by_face(GROUND_SUBDIV, 2);
+    let mut cells = [props, props_lo, flowers, grass].map(|layer| layer.cells(&finder).into_iter());
+    let mut ground = ground.into_iter();
+    let mut out = Vec::with_capacity(finder.cells.len());
+    let mut group_ground = vec![Builder::default(); finder.coarse.len()];
+    let mut group_scenery = vec![Builder::default(); finder.coarse.len()];
+    for (i, &dir) in finder.cells.iter().enumerate() {
+        let g = ground.next().unwrap_or_default();
+        let [p, l, d, s] = cells.each_mut().map(|layer| layer.next().unwrap());
         if g.pos.is_empty() && p.pos.is_empty() && d.pos.is_empty() && s.pos.is_empty() {
             continue;
         }
-        let mut near = g.clone();
+        let group = finder.parent[i];
+        group_ground[group].append(&g);
         if layers.props {
-            near.append(&p);
+            group_scenery[group].append(&l);
+        }
+        let ang = [&g, &p, &d, &s]
+            .iter()
+            .flat_map(|b| b.pos.chunks(3))
+            .map(|q| v3(q[0], q[1], q[2]).norm().dot(dir).clamp(-1.0, 1.0).acos())
+            .fold(0.0, f32::max);
+        let top = [&g, &p, &d, &s]
+            .iter()
+            .flat_map(|b| b.pos.chunks(3))
+            .map(|q| v3(q[0], q[1], q[2]).len())
+            .fold(0.0, f32::max);
+        let low = g.pos.chunks(3).map(|q| v3(q[0], q[1], q[2]).len()).fold(top, f32::min);
+        let (grass, grass_rest) = if layers.grass { s.split_grass() } else { Default::default() };
+        // One set of vertices per cell, in the order the levels add them, so
+        // each level is a range of its triangles: far is the ground, mid
+        // adds the coarse scenery, near the full scenery, flowers and half
+        // the grass, and close the rest of the grass.
+        let mut layers_in_order = vec![g];
+        let mut ranges = [0usize; 7];
+        if layers.props {
+            layers_in_order.push(p);
         }
         if layers.flowers {
-            near.append(&d);
+            layers_in_order.push(d);
         }
-        let mut close = near.clone();
-        if layers.grass {
-            close.append(&s);
-            near.append_thinned_grass(&s);
-        }
-        let ang = close.pos.chunks(3).map(|q| v3(q[0], q[1], q[2]).norm().dot(dir).clamp(-1.0, 1.0).acos()).fold(0.0, f32::max);
-        let mut mid = g.clone();
+        layers_in_order.push(grass);
+        layers_in_order.push(grass_rest);
         if layers.props {
-            mid.append(&l);
+            layers_in_order.push(l);
         }
-        out.push(Tile { dir, ang, close: close.indexed().upload(), near: near.indexed().upload(), mid: mid.indexed().upload(), far: g.indexed().upload() });
+        let mut all = Builder::default();
+        let mut sizes = Vec::new();
+        for b in &layers_in_order {
+            sizes.push(b.pos.len() / 9);
+            all.append(b);
+        }
+        // Triangle ranges: ground, near-only scenery (props and flowers),
+        // half the grass, the other half, the coarse scenery.
+        let n_props = if layers.props { 1 } else { 0 } + if layers.flowers { 1 } else { 0 };
+        let ground = sizes[0];
+        let scenery: usize = sizes[1..1 + n_props].iter().sum();
+        let (half, rest) = (sizes[1 + n_props], sizes[2 + n_props]);
+        let coarse = if layers.props { sizes[3 + n_props] } else { 0 };
+        ranges[0] = ground;
+        ranges[1] = ranges[0] + scenery;
+        ranges[2] = ranges[1] + half;
+        ranges[3] = ranges[2] + rest;
+        ranges[4] = ranges[3] + coarse;
+        let all = all.indexed();
+        if all.idx.is_empty() {
+            // Over 65,535 vertices: too many for one set of 16-bit indices.
+            out.push(tile_from_levels(dir, (ang, top, low), group, layers_in_order, layers));
+            continue;
+        }
+        let mid = (coarse > 0).then(|| [&all.idx[..ranges[0] * 3], &all.idx[ranges[3] * 3..ranges[4] * 3]].concat());
+        let meshes = all.upload_cell([ranges[0], ranges[2], ranges[3]], mid.as_deref());
+        out.push(Tile { dir, ang, top, low, group, far: meshes[0], mid: meshes[1], near: meshes[2], close: meshes[3] });
     }
-    out
+    let upload =
+        |b: Builder| if b.pos.is_empty() { unsafe { std::mem::zeroed() } } else { b.indexed().upload_static() };
+    let groups = group_ground
+        .into_iter()
+        .zip(group_scenery)
+        .zip(coarse_ground)
+        .map(|((g, l), c)| {
+            let mut mid = g;
+            mid.append(&l);
+            Group { mid: upload(mid), far: upload(c.with_skirt(0.6)) }
+        })
+        .collect();
+    (out, groups)
+}
+
+/// A cell built as separate meshes, one per level, for when its vertices
+/// do not fit one set of 16-bit indices. `layers` are in the order `tiles`
+/// collects them.
+fn tile_from_levels(
+    dir: V3,
+    (ang, top, low): (f32, f32, f32),
+    group: usize,
+    mut layers: Vec<Builder>,
+    on: TileLayers,
+) -> Tile {
+    let coarse = if on.props { layers.pop() } else { None };
+    let rest = layers.pop().unwrap_or_default();
+    let half = layers.pop().unwrap_or_default();
+    let mut near = Builder::default();
+    for b in &layers {
+        near.append(b);
+    }
+    let mut mid = layers[0].clone();
+    if let Some(c) = &coarse {
+        mid.append(c);
+    }
+    let far = layers.swap_remove(0);
+    near.append(&half);
+    let mut close = near.clone();
+    close.append(&rest);
+    let up = |b: Builder| b.indexed().upload_static();
+    Tile { dir, ang, top, low, group, far: up(far), mid: up(mid), near: up(near), close: up(close) }
 }
 
 /// White unit shapes, coloured and placed at draw time.
@@ -554,7 +961,15 @@ impl Kit {
             singles.push(single);
         }
         rigs[BALL].coarse = Some((COARSE_BALL, 0.05));
-        Kit { ball: singles[BALL], cone: singles[1], stub: singles[2], tube: singles[3], cube: singles[4], taper: singles[6], rigs }
+        Kit {
+            ball: singles[BALL],
+            cone: singles[1],
+            stub: singles[2],
+            tube: singles[3],
+            cube: singles[4],
+            taper: singles[6],
+            rigs,
+        }
     }
 
     /// A tapering limb from `a` (radius `r0`) to `b` (radius `r1`), with round ends.
@@ -570,5 +985,109 @@ impl Kit {
         let d = b - a;
         let len = d.len().max(1e-4);
         gl.part(self.ball, place((a + b) * 0.5, d, any_perp(d), v3(r, len * 0.5 + r * 0.5, r)), c, 0.0, Ink::Radial);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_cell_finder_agrees_with_a_search_of_every_cell() {
+        let finder = CellFinder::new();
+        assert_eq!(finder.cells.len(), 320);
+        let mut rng = Rng::new(7);
+        for _ in 0..5000 {
+            let p = rng.dir();
+            let best = (0..finder.cells.len())
+                .max_by(|&a, &b| finder.cells[a].dot(p).total_cmp(&finder.cells[b].dot(p)))
+                .unwrap();
+            assert_eq!(finder.cells[finder.nearest(p)].dot(p), finder.cells[best].dot(p));
+        }
+    }
+
+    /// Whether `p` lies in the spherical triangle `f`, give or take `eps`.
+    fn inside(f: &[V3; 3], p: V3, eps: f32) -> bool {
+        (0..3).all(|k| {
+            let (a, b, c) = (f[k], f[(k + 1) % 3], f[(k + 2) % 3]);
+            let n = a.cross(b);
+            n.dot(p) * n.dot(c).signum() >= -eps
+        })
+    }
+
+    #[test]
+    fn coarse_and_fine_ground_split_along_the_same_boundaries() {
+        // Every fine triangle lies in the coarse triangle `by_face` takes it
+        // for, so a group covers the same ground at either level of detail.
+        let coarse = icosphere(COARSE_SUBDIV);
+        let fine = icosphere(GROUND_SUBDIV);
+        let shift = 2 * (GROUND_SUBDIV - COARSE_SUBDIV);
+        for (i, f) in fine.iter().enumerate() {
+            let outer = &coarse[i >> shift];
+            assert!(f.iter().all(|&v| inside(outer, v, 1e-4)), "fine face {i}");
+        }
+        // And every cell lies in its group.
+        let (groups, cells) = (icosphere(1), icosphere(2));
+        let finder = CellFinder::new();
+        for (j, f) in cells.iter().enumerate() {
+            assert!(f.iter().all(|&v| inside(&groups[finder.parent[j]], v, 1e-4)), "cell {j}");
+        }
+        // The cells' and groups' directions are those faces' centres.
+        for (j, f) in cells.iter().enumerate() {
+            assert!(inside(f, finder.cells[j], 0.0));
+        }
+    }
+
+    #[test]
+    fn ground_splits_into_cells_and_groups_by_face() {
+        let ground = planet(GROUND_SUBDIV, &|_| 10.0, &|_, _| (crate::gl::rgb(0x808080), 0.0));
+        let n = ground.pos.len();
+        let cells = ground.clone().by_face(GROUND_SUBDIV, 2);
+        assert_eq!(cells.len(), 320);
+        assert!(cells.iter().all(|c| c.pos.len() == n / 320));
+        let groups = ground.by_face(GROUND_SUBDIV, 1);
+        assert_eq!(groups.len(), 80);
+    }
+
+    #[test]
+    fn every_group_has_four_cells() {
+        let finder = CellFinder::new();
+        for g in 0..finder.coarse.len() {
+            assert_eq!(finder.parent.iter().filter(|&&p| p == g).count(), 4, "group {g}");
+        }
+    }
+
+    #[test]
+    fn a_small_field_fills_up_with_all_its_blades() {
+        let mut rng = Rng::new(9);
+        let centre = V3::Y;
+        let ang = 1.6 / 25.0;
+        let b = grass_in(&mut rng, 3500, (centre, ang), &|_| 25.0, &|_| true, (0.1, 0.2), &[crate::gl::rgb(0xC99E48)]);
+        // Twelve vertices a blade.
+        assert!(b.pos.len() / 36 >= 3500, "{} blades", b.pos.len() / 36);
+        let roots_in_field = b.pos.chunks(3).all(|q| v3(q[0], q[1], q[2]).norm().dot(centre) > (ang + 0.02).cos());
+        assert!(roots_in_field);
+    }
+
+    #[test]
+    fn a_skirt_hangs_from_open_edges_only() {
+        let mut b = Builder::default();
+        let w = crate::gl::rgb(0xFFFFFF);
+        let (p0, p1, p2, p3) = (v3(0.0, 10.0, 0.0), v3(1.0, 10.0, 0.0), v3(0.0, 10.0, 1.0), v3(1.0, 10.0, 1.0));
+        b.tri([p0, p1, p2], [(0.0, 0.0); 3], w, V3::Y, None);
+        b.tri([p1, p3, p2], [(0.0, 0.0); 3], w, V3::Y, None);
+        let skirted = b.with_skirt(0.5);
+        // Two triangles share one edge; the other four edges each get a quad
+        // seen from both sides: four triangles of three vertices.
+        assert_eq!(skirted.pos.len() / 3, 6 + 4 * 4 * 3);
+    }
+
+    #[test]
+    fn split_grass_keeps_every_blade_once() {
+        let mut rng = Rng::new(3);
+        let g = grass(&mut rng, 101, &|_| 10.0, &|_| true, (0.1, 0.2), &[crate::gl::rgb(0x55AA55)]);
+        let (kept, rest) = g.split_grass();
+        assert_eq!(kept.pos.len() + rest.pos.len(), g.pos.len());
+        assert!(kept.pos.len() >= rest.pos.len());
     }
 }

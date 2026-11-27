@@ -16,6 +16,7 @@
 //! - `LITTLEPRINCE_CAPTURE=FILE.png` with `LITTLEPRINCE_SCENE` (`title`, `icon`,
 //!   `b612`, `lamp`, `desert`, `fly`) and `LITTLEPRINCE_AT` (seconds of autoplay first):
 //!   render one frame to a PNG and exit.
+//! - `LITTLEPRINCE_SECONDS=N`: quit after N seconds (for scripted runs).
 
 mod app;
 #[cfg(all(target_os = "linux", feature = "gizlet-os"))]
@@ -107,7 +108,8 @@ fn main() {
             ffi::InitAudioDevice();
             ffi::IsAudioDeviceReady()
         };
-    let lang = if std::env::var("GIZLET_LANG").is_ok_and(|v| v.starts_with("en")) { text::Lang::En } else { text::Lang::Zh };
+    let lang =
+        if std::env::var("GIZLET_LANG").is_ok_and(|v| v.starts_with("en")) { text::Lang::En } else { text::Lang::Zh };
     let zoom = view().1.max(1.0);
     let mut controls = input::Controls::new();
     let mut app = App::new(lang, zoom, audio);
@@ -123,10 +125,14 @@ fn main() {
         prof::enable(v != "2", v == "1");
     }
     let start = unsafe { ffi::GetTime() };
+    let quit_after: Option<f64> = std::env::var("LITTLEPRINCE_SECONDS").ok().and_then(|v| v.parse().ok());
     while !unsafe { ffi::WindowShouldClose() } && !app.quit {
         let frame = prof::start_frame();
         let dt = if capture.is_some() { 1.0 / 60.0 } else { unsafe { ffi::GetFrameTime() }.min(0.1) };
         let now = unsafe { ffi::GetTime() } - start;
+        if quit_after.is_some_and(|s| now >= s) {
+            break;
+        }
         controls.poll(dt, now);
         if capture.is_none() {
             app.update(dt, &controls);
@@ -152,7 +158,12 @@ fn main() {
         }
         prof::mark("post");
         unsafe {
-            ffi::BeginMode2D(Camera2D { offset: Vector2 { x: dest.x, y: dest.y }, target: Vector2 { x: 0.0, y: 0.0 }, rotation: 0.0, zoom: k });
+            ffi::BeginMode2D(Camera2D {
+                offset: Vector2 { x: dest.x, y: dest.y },
+                target: Vector2 { x: 0.0, y: 0.0 },
+                rotation: 0.0,
+                zoom: k,
+            });
         }
         if app.hud {
             hud::draw(&app);
@@ -177,7 +188,9 @@ fn main() {
         unsafe { ffi::EndDrawing() };
         prof::mark("swap");
         if let Some(frame) = frame {
-            frame.finish(|tris| format!("{:?} fx{} parts{} tris{}k", app.world().kind, app.fx_level, app.fx.count(), tris / 1000));
+            frame.finish(|tris| {
+                format!("{:?} fx{} parts{} tris{}k", app.world().kind, app.fx_level, app.fx.count(), tris / 1000)
+            });
         }
     }
     unsafe { ffi::CloseWindow() };

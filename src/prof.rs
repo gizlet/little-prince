@@ -19,6 +19,9 @@ struct Prof {
     tris: Vec<(&'static str, u64)>,
     frame_tris: u64,
     draws: u64,
+    frame_draws: u64,
+    peak_tris: u64,
+    peak_draws: u64,
 }
 
 thread_local! {
@@ -52,6 +55,7 @@ pub fn mesh(tris: u64, lod: Option<&'static str>) {
         }
         p.frame_tris += tris;
         p.draws += 1;
+        p.frame_draws += 1;
         if let Some(name) = lod {
             match p.tris.iter_mut().find(|s| s.0 == name) {
                 Some(s) => s.1 += tris,
@@ -140,19 +144,34 @@ impl FrameTimer {
         P.with(|p| {
             let mut p = p.borrow_mut();
             let tris = std::mem::take(&mut p.frame_tris);
+            let frame_draws = std::mem::take(&mut p.frame_draws);
+            p.peak_tris = p.peak_tris.max(tris);
+            p.peak_draws = p.peak_draws.max(frame_draws);
             p.frames += 1;
             let now = unsafe { ffi::GetTime() };
             if now - p.since >= 3.0 {
                 let n = p.frames as f64;
                 let total = (now - p.since) / n * 1000.0;
                 let parts: Vec<String> = p.stages.iter().map(|(s, t)| format!("{s} {:.1}", t / n * 1000.0)).collect();
-                let lod: Vec<String> = p.tris.iter().map(|(s, c)| format!("{s} {}k", c / p.frames as u64 / 1000)).collect();
+                let lod: Vec<String> =
+                    p.tris.iter().map(|(s, c)| format!("{s} {}k", c / p.frames as u64 / 1000)).collect();
                 let draws = p.draws / p.frames as u64;
                 // Keep the existing report format consumed by profiling scripts.
-                eprintln!("prof: {:.1} fps {:.1} ms | {} | {} | {} draws {draws}k", 1000.0 / total, total, parts.join(" · "), describe(tris), lod.join(" "));
+                eprintln!(
+                    "prof: {:.1} fps {:.1} ms | {} | {} | {} draws {draws}k | peak {}k tris {} draws",
+                    1000.0 / total,
+                    total,
+                    parts.join(" · "),
+                    describe(tris),
+                    lod.join(" "),
+                    p.peak_tris / 1000,
+                    p.peak_draws
+                );
                 p.tris.clear();
                 p.stages.clear();
                 p.draws = 0;
+                p.peak_tris = 0;
+                p.peak_draws = 0;
                 p.frames = 0;
                 p.since = now;
             }

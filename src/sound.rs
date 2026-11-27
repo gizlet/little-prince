@@ -33,7 +33,13 @@ pub struct Sounds {
 
 fn load(samples: &[f32]) -> Vec<Sound> {
     let mut pcm: Vec<i16> = samples.iter().map(|s| (s.clamp(-1.0, 1.0) * 32000.0) as i16).collect();
-    let wave = Wave { frameCount: pcm.len() as u32, sampleRate: RATE, sampleSize: 16, channels: 1, data: pcm.as_mut_ptr() as _ };
+    let wave = Wave {
+        frameCount: pcm.len() as u32,
+        sampleRate: RATE,
+        sampleSize: 16,
+        channels: 1,
+        data: pcm.as_mut_ptr() as _,
+    };
     // raylib copies the samples into its own buffer.
     let first = unsafe { ffi::LoadSoundFromWave(wave) };
     let mut v = vec![first];
@@ -99,15 +105,28 @@ fn thump() -> Vec<f32> {
 
 impl Sounds {
     pub fn new(on: bool) -> Sounds {
-        let mut s =
-            Sounds { on, chimes: vec![], pop: vec![], whoosh: vec![], land: vec![], splash: vec![], step: vec![], next: 0 };
+        let mut s = Sounds {
+            on,
+            chimes: vec![],
+            pop: vec![],
+            whoosh: vec![],
+            land: vec![],
+            splash: vec![],
+            step: vec![],
+            next: 0,
+        };
         if !on {
             return s;
         }
         let mut rng = Rng::new(17);
         s.chimes = NOTES.iter().map(|&f| load(&chime(f))).collect();
         s.pop = load(&pop());
-        s.whoosh = load(&noise(&mut rng, 1.8, |t| 0.03 + 0.3 * (t / 1.1).min(1.0), |t| (t / 1.8 * std::f32::consts::PI).sin().powi(2) * 0.7));
+        s.whoosh = load(&noise(
+            &mut rng,
+            1.8,
+            |t| 0.03 + 0.3 * (t / 1.1).min(1.0),
+            |t| (t / 1.8 * std::f32::consts::PI).sin().powi(2) * 0.7,
+        ));
         s.land = load(&thump());
         s.splash = load(&noise(&mut rng, 0.4, |_| 0.55, |t| (-t * 9.0).exp() * (t * 200.0).min(1.0) * 0.45));
         s.step = load(&noise(&mut rng, 0.07, |_| 0.25, |t| (-t * 70.0).exp() * 0.5));

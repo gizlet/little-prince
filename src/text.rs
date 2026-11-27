@@ -247,7 +247,9 @@ impl Fonts {
     pub fn new(zoom: f32) -> Fonts {
         let set = codepoints();
         let mut faces = Vec::new();
-        for (w, sizes, face) in [(Weight::Text, &[11.0, 13.0, 16.0, 20.0][..], INTER), (Weight::Display, &[28.0, 56.0][..], GROTESK)] {
+        for (w, sizes, face) in
+            [(Weight::Text, &[11.0, 13.0, 16.0, 20.0][..], INTER), (Weight::Display, &[28.0, 56.0][..], GROTESK)]
+        {
             for &px in sizes {
                 faces.push((w, px, build(face, (px * zoom).round() as i32, &set)));
             }

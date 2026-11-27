@@ -5,9 +5,9 @@
 
 use crate::fx::{Burst, Fx};
 use crate::gl::{self, lighten, mix, rgb, rgba, Gl, Ink, Lighting, Post, Sprites};
+use crate::hero::{Hero, Motion};
 use crate::input::{Button, Controls};
 use crate::math::{any_perp, approach3, clamp01, place, smooth, v3, Rng, V3};
-use crate::hero::{Hero, Motion};
 use crate::mesh::Kit;
 use crate::player::{Ev, Player, SPEED};
 use crate::sound::{Sfx, Sounds};
@@ -132,7 +132,11 @@ impl App {
             hud: true,
             hero: Hero::load(&std::env::var("LITTLEPRINCE_HERO").unwrap_or_else(|_| HERO.to_string())),
             closeup: false,
-            fx_level: std::env::var("LITTLEPRINCE_FX").ok().and_then(|v| v.parse().ok()).unwrap_or(if cfg!(feature = "gizlet-os") { 1 } else { 2 }).min(2),
+            fx_level: std::env::var("LITTLEPRINCE_FX")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(if cfg!(feature = "gizlet-os") { 1 } else { 2 })
+                .min(2),
             autoplay: false,
             quit_hold: 0.0,
             quit: false,
@@ -330,7 +334,12 @@ impl App {
             }
         }
         self.player_effects();
-        let motion = Motion { speed: sp, grounded: self.player.grounded, flying: self.mode == Mode::Fly, cheer: self.player.cheer };
+        let motion = Motion {
+            speed: sp,
+            grounded: self.player.grounded,
+            flying: self.mode == Mode::Fly,
+            cheer: self.player.cheer,
+        };
         if let Some(h) = &mut self.hero {
             h.update(dt, &motion);
         }
@@ -342,22 +351,31 @@ impl App {
         self.update_camera(dt);
     }
 
+    /// How high the birds carry the prince: high enough to see the planet
+    /// round below.
+    fn flight_height(&self) -> f32 {
+        (self.world().radius * 0.75).max(13.0)
+    }
+
     fn update_flight(&mut self) {
         let ft = self.mode_t;
         if ft < LEAVE {
             let u = ft / LEAVE;
-            self.player.alt = 0.4 * u + 13.0 * u * u * u;
-            self.player.alt_v = (0.4 + 39.0 * u * u) / LEAVE;
+            let h = self.flight_height();
+            self.player.alt = 0.4 * u + h * u * u * u;
+            self.player.alt_v = (0.4 + 3.0 * h * u * u) / LEAVE;
             self.player.grounded = false;
         } else if !self.switched {
             self.switched = true;
-            self.arrive_at(self.fly_to, 13.0);
+            let h = (self.worlds[self.fly_to].radius * 0.75).max(13.0);
+            self.arrive_at(self.fly_to, h);
             self.player.reach_target = 1.0;
         } else {
             let u = ((ft - LEAVE) / ARRIVE).min(1.0);
             let k = 1.0 - u;
-            self.player.alt = 13.0 * k * k * k;
-            self.player.alt_v = -39.0 * k * k / ARRIVE;
+            let h = self.flight_height();
+            self.player.alt = h * k * k * k;
+            self.player.alt_v = -3.0 * h * k * k / ARRIVE;
             self.player.grounded = false;
             if u >= 1.0 {
                 self.player.land(3.5);
@@ -401,17 +419,21 @@ impl App {
                     self.fx.ring(p, up, 0.4 + k * 0.3, 0.5, rgba(dust, 0.8));
                     if self.player.reach_target > 0.5 || speed > 3.0 {
                         self.fx.ring(p, up, 1.4, 1.0, accent);
-                        self.fx.burst(p, up, Burst {
-                            n: 30,
-                            speed: (0.5, 1.8),
-                            size: (0.03, 0.08),
-                            life: (0.7, 1.5),
-                            cols: &[accent, lighten(accent, 0.6), rgb(0xFFFFFF)],
-                            glow: true,
-                            grav: 0.8,
-                            drag: 1.6,
-                            aim: 0.5,
-                        });
+                        self.fx.burst(
+                            p,
+                            up,
+                            Burst {
+                                n: 30,
+                                speed: (0.5, 1.8),
+                                size: (0.03, 0.08),
+                                life: (0.7, 1.5),
+                                cols: &[accent, lighten(accent, 0.6), rgb(0xFFFFFF)],
+                                glow: true,
+                                grav: 0.8,
+                                drag: 1.6,
+                                aim: 0.5,
+                            },
+                        );
                         self.snd.play(Sfx::Chime(2), 1.0, 0.4);
                     }
                     self.fx.shake = self.fx.shake.max(k * 0.15);
@@ -454,7 +476,11 @@ impl App {
                 (pos, target, rate.max(if self.look_t < 0.3 { 12.0 } else { 0.0 }))
             }
             Mode::Fly => {
-                let k = if self.mode_t < LEAVE { self.mode_t / LEAVE } else { 1.0 - clamp01((self.mode_t - LEAVE) / ARRIVE) };
+                let k = if self.mode_t < LEAVE {
+                    self.mode_t / LEAVE
+                } else {
+                    1.0 - clamp01((self.mode_t - LEAVE) / ARRIVE)
+                };
                 (p + n * (0.95 + k * 0.9) - f * (2.0 + k * 1.2), p + n * (0.5 + 0.2 * k), 60.0)
             }
         };
@@ -469,7 +495,8 @@ impl App {
         let n = self.player.n;
         let f = self.player.face;
         let r = self.player.right();
-        let hand = if self.hero.is_some() { Hero::crown(&self.player.pose_frame(), HERO_H) } else { self.player.hands_up() };
+        let hand =
+            if self.hero.is_some() { Hero::crown(&self.player.pose_frame(), HERO_H) } else { self.player.hands_up() };
         (0..BIRDS)
             .map(|i| {
                 let i = i as f32;
@@ -493,10 +520,22 @@ impl App {
             let flap = (self.t * 11.0 + i as f32).sin();
             let k = k * 1.7;
             g.part(self.kit.ball, place(pos, n, fwd, v3(0.02, 0.018, 0.045) * k), white, 0.1, Ink::Radial);
-            g.part(self.kit.cone, place(pos + fwd * 0.04 * k, fwd, n, v3(0.008, 0.02, 0.008) * k), rgb(0xF2B04E), 0.0, Ink::None);
+            g.part(
+                self.kit.cone,
+                place(pos + fwd * 0.04 * k, fwd, n, v3(0.008, 0.02, 0.008) * k),
+                rgb(0xF2B04E),
+                0.0,
+                Ink::None,
+            );
             for side in [-1.0f32, 1.0] {
                 let wd = (fwd.cross(n) * side + n * flap * 0.9).norm();
-                g.part(self.kit.ball, place(pos + wd * 0.038 * k, wd, fwd, v3(0.01, 0.042, 0.022) * k), white, 0.1, Ink::Radial);
+                g.part(
+                    self.kit.ball,
+                    place(pos + wd * 0.038 * k, wd, fwd, v3(0.01, 0.042, 0.022) * k),
+                    white,
+                    0.1,
+                    Ink::Radial,
+                );
             }
         }
     }
@@ -506,7 +545,8 @@ impl App {
         if k < 0.01 {
             return;
         }
-        let hand = if self.hero.is_some() { Hero::crown(&self.player.pose_frame(), HERO_H) } else { self.player.hands_up() };
+        let hand =
+            if self.hero.is_some() { Hero::crown(&self.player.pose_frame(), HERO_H) } else { self.player.hands_up() };
         let c = rgba(ink, 0.7 * k);
         unsafe {
             ffi::rlBegin(ffi::RL_LINES as i32);
@@ -540,11 +580,16 @@ impl App {
         };
         let spr = Sprites { right, up, fwd };
         let (lamp, lamp_on) = w.lamp_light().unwrap_or((v3(0.0, 1000.0, 0.0), 0.0));
-        let fog = match w.kind {
-            Kind::B612 => (5.0, 15.0),
-            Kind::Desert => (5.0, 16.0),
+        // The haze starts a little beyond the ground the camera looks down
+        // on, so the planet stays clear from the title's height too.
+        let lift = (self.cam.pos.len() - w.surface(self.cam.pos.norm()) - 1.0).max(0.0);
+        let (near, far) = match w.kind {
+            Kind::B612 => (6.0, 18.0),
+            Kind::Desert => (7.0, 22.0),
             Kind::Lamp => (6.0, 20.0),
         };
+        let fog = (near + lift, far + lift * 2.0);
+        let sky_d = w.sky_distance(self.cam.pos);
         let light = Lighting {
             sun: sky.sun,
             sun_col: sky.sun_col,
@@ -584,7 +629,9 @@ impl App {
                 ffi::rlDisableColorBlend();
             }
         }
-        w.draw(g, &self.kit, t, self.cam.pos, fwd);
+        // The title looks at the planet from afar, with nothing else to draw.
+        let detail = if self.mode == Mode::Title { 1.6 } else { 1.0 };
+        w.draw(g, &self.kit, t, self.cam.pos, fwd, detail);
         crate::prof::mark("world-queue");
         match &self.hero {
             Some(_) if crate::prof::skip("hero") => {}
@@ -598,7 +645,7 @@ impl App {
         // The sky gradient last, on a quad at the far end of the view: only the
         // pixels the planet leaves uncovered are filled, not the whole screen.
         if !crate::prof::skip("backdrop") {
-            draw_backdrop(self.cam.pos + shake, fwd, right, up, 50.0 + warp * 14.0, top, bottom);
+            draw_backdrop(self.cam.pos + shake, fwd, right, up, 50.0 + warp * 14.0, top, bottom, sky_d + 4.0);
         }
         if opaque {
             unsafe {
@@ -610,7 +657,7 @@ impl App {
         // Stars, sun, moon and clouds after the solids, so the depth test
         // rejects whatever the planet hides.
         if !crate::prof::skip("sky") {
-            gl::additive(|| w.draw_sky(g, &spr, self.cam.pos, t, warp, &sky));
+            gl::additive(|| w.draw_sky(g, &spr, self.cam.pos, t, warp, &sky, sky_d));
         }
         crate::prof::mark("sky");
         if self.hero.is_none() {
@@ -671,10 +718,10 @@ impl App {
 
 /// A camera-facing quad just inside the far plane, `top` colour at the top
 /// of the screen fading to `bottom`.
-fn draw_backdrop(cam: V3, fwd: V3, right: V3, up: V3, fovy: f32, top: Color, bottom: Color) {
-    // Well inside the far plane: on a 16-bit depth buffer a backdrop near
-    // it rounds to the cleared depth, fails the test and flickers black.
-    let d = crate::world::SKY_D + 4.0;
+#[allow(clippy::too_many_arguments)]
+fn draw_backdrop(cam: V3, fwd: V3, right: V3, up: V3, fovy: f32, top: Color, bottom: Color, d: f32) {
+    // `d` is well inside the far plane: on a 16-bit depth buffer a backdrop
+    // near it rounds to the cleared depth, fails the test and flickers black.
     let h = d * (fovy.to_radians() * 0.5).tan() * 1.1;
     let w = h * (gl::W as f32 / gl::H as f32) * 1.1;
     let c = cam + fwd * d;
@@ -682,7 +729,12 @@ fn draw_backdrop(cam: V3, fwd: V3, right: V3, up: V3, fovy: f32, top: Color, bot
         ffi::rlDisableBackfaceCulling();
         ffi::rlSetTexture(0);
         ffi::rlBegin(ffi::RL_QUADS as i32);
-        for (p, col) in [(c - right * w + up * h, top), (c - right * w - up * h, bottom), (c + right * w - up * h, bottom), (c + right * w + up * h, top)] {
+        for (p, col) in [
+            (c - right * w + up * h, top),
+            (c - right * w - up * h, bottom),
+            (c + right * w - up * h, bottom),
+            (c + right * w + up * h, top),
+        ] {
             ffi::rlColor4ub(col.r, col.g, col.b, 255);
             ffi::rlVertex3f(p.x, p.y, p.z);
         }
@@ -693,5 +745,15 @@ fn draw_backdrop(cam: V3, fwd: V3, right: V3, up: V3, fovy: f32, top: Color, bot
 }
 
 fn puff(n: usize, cols: &[Color; 2], speed: f32) -> Burst<'_> {
-    Burst { n, speed: (0.3 * speed, 0.9 * speed), size: (0.04, 0.08), life: (0.4, 0.8), cols, glow: false, grav: 1.5, drag: 3.0, aim: 0.55 }
+    Burst {
+        n,
+        speed: (0.3 * speed, 0.9 * speed),
+        size: (0.04, 0.08),
+        life: (0.4, 0.8),
+        cols,
+        glow: false,
+        grav: 1.5,
+        drag: 3.0,
+        aim: 0.55,
+    }
 }
