@@ -5,3 +5,7 @@ rustflags = ["-C", "target-feature=+crt-static"]
 
 [target.aarch64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
+
+# raylib-sys builds raylib with CMake, which picks the DLL runtime unless told otherwise.
+[env]
+CMAKE_TOOLCHAIN_FILE = { value = "scripts/msvc-static-crt.cmake", relative = true }
