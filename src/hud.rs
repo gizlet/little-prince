@@ -58,11 +58,11 @@ pub fn prepare(app: &App, k: f32) {
             }
         }
         let cache = c.get_or_insert_with(|| Cache { rt: unsafe { ffi::LoadRenderTexture(w, h) }, key, at: -1.0 });
-        if cache.key == key && app.t - cache.at < 0.25 && cache.at >= 0.0 {
+        if cache.key == key && app.clock - cache.at < 0.25 && cache.at >= 0.0 {
             return;
         }
         cache.key = key;
-        cache.at = app.t;
+        cache.at = app.clock;
         unsafe {
             ffi::BeginTextureMode(cache.rt);
             ffi::ClearBackground(Color { r: 0, g: 0, b: 0, a: 0 });

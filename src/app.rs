@@ -114,6 +114,9 @@ pub struct App {
     save_t: f32,
     /// The sun's height over the prince last frame, for counting sunsets.
     sun_e: f32,
+    /// Seconds since the game started, running on while play is paused:
+    /// for refreshing the HUD.
+    pub clock: f32,
 }
 
 /// Seconds between saves while playing, besides those on arriving, scoring,
@@ -193,6 +196,7 @@ impl App {
             menu: None,
             save_t: 0.0,
             sun_e: 0.0,
+            clock: 0.0,
         }
     }
 
@@ -222,6 +226,7 @@ impl App {
             "visited" => self.journey.visited.iter().filter(|v| **v).count().to_string(),
             "save-failed" => (self.store.failed as u8).to_string(),
             "pulled-now" => self.world().sprouts_out().to_string(),
+            "flight-pose" => self.player.reach_target.to_string(),
             _ => {
                 if let Some(p) = name.strip_prefix("score.").and_then(planet) {
                     return self.worlds[p].score.to_string();
@@ -313,6 +318,7 @@ impl App {
         let planet = j.planet;
         self.journey = j;
         self.arrive_at(planet, 0.0);
+        self.player.reach_target = 0.0;
         self.start_play(planet);
         self.save_now();
     }
@@ -459,6 +465,7 @@ impl App {
     }
 
     pub fn update(&mut self, dt: f32, c: &Controls) {
+        self.clock += dt;
         self.stats.update(dt);
         let combo = c.down(Button::Select) && c.down(Button::Start);
         if combo {
@@ -482,6 +489,8 @@ impl App {
                 if self.slot.is_none() {
                     let cur = self.cur;
                     self.arrive_at(cur, 0.0);
+                    // A flight cut short leaves no flight pose behind.
+                    self.player.reach_target = 0.0;
                     self.set_mode(Mode::Title);
                     self.open_menu(Page::Journeys);
                 }
