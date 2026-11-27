@@ -97,9 +97,35 @@ in one, half of walking.
 - Saves happen on arrival, when a task is done, when the menu opens and on
   quitting. Settings (language, effects level, camera, volume, A/B swap) are a
   separate file shared by all slots.
+- Version 2 added each planet's task in parts (B612: sprouts, volcanoes,
+  caterpillars), the stardust carried, troubles seen to and knock-backs; a
+  version 1 journey's score becomes its first part.
 - A journal kept like the geographer's book: planets, characters and things
   seen, statistics (sunsets watched, sprouts pulled, distance walked, play
   time) and about twenty achievements.
+
+## Troubles and stardust
+
+Troubles are things to look after, never enemies. Running into one knocks
+the prince back, holds him still for a moment and spills up to three of the
+stardust he carries; the spilled motes glitter on the ground for nine
+seconds, to be gathered again.
+
+- **Stardust.** Twelve motes float over each planet and come back forty
+  seconds after they are gathered. Every trouble seen to sets a few more free.
+  It is counted in the journey, for the journal and achievements.
+- **B612.** Ten sprouts to pull up: a sprout left fully grown for twenty
+  seconds seeds another nearby, up to fourteen. Two volcanoes to sweep by
+  standing beside each for two and a half seconds; left alone, a volcano
+  glows brighter and every sixteen seconds or so throws five cinders, one at
+  a prince standing near, each marked by a shadow before it lands. Three
+  caterpillars crawl towards the rose: landing on one from a jump turns it
+  into a butterfly, walking into one knocks the prince back. A new one comes
+  forty-five seconds later, so the planet always needs some looking after.
+
+Troubles add about 1,500 triangles a frame and no draw calls: the
+caterpillars are batched with the other small shapes, only their heads are
+inked, and those more than eight units from the camera are not drawn.
 
 ## Controls
 

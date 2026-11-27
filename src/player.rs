@@ -115,6 +115,15 @@ impl Player {
         self.scarf_prev = self.scarf;
     }
 
+    /// Knocked back by a trouble at `from`: a hop away from it.
+    pub fn knock(&mut self, from: V3) {
+        let away = (self.feet() - from).flatten(self.n);
+        let away = if away.len() < 1e-3 { -self.face } else { away.norm() };
+        self.vel = away * 2.6;
+        self.alt_v = 2.2;
+        self.grounded = false;
+    }
+
     pub fn feet(&self) -> V3 {
         self.n * (self.radius + self.alt)
     }

@@ -18,6 +18,7 @@ use crate::math::{any_perp, approach, place, smooth, v3, Frame, Rng, V3};
 use crate::mesh::{self, no_sway, Builder, Group, Kit, Tile};
 use crate::sound::{Sfx, Sounds};
 use crate::text::T;
+use crate::trouble::{self, Caterpillar, Cinder, Dust};
 use raylib_sys::{Color, Mesh};
 use std::f32::consts::{PI, TAU};
 
@@ -104,6 +105,18 @@ pub struct PState {
     pub feet: V3,
     pub face: V3,
     pub speed: f32,
+    pub grounded: bool,
+    /// Whether the prince came down from a jump this frame.
+    pub landed: bool,
+}
+
+/// Where autoplay should walk: a point, how near to stop, whether to stand
+/// still once there, and whether to jump on it.
+pub struct Goal {
+    pub at: V3,
+    pub arrive: f32,
+    pub still: bool,
+    pub hop: bool,
 }
 
 fn wsum(c: [(Color, f32); 3]) -> Color {
@@ -189,6 +202,12 @@ fn spot_at(r: f32, f: f32, s: f32) -> V3 {
 
 /// Picks `count` directions at least `sep` radians from each other and from
 /// `taken`.
+/// Which of `active` volcanoes are swept: those whose bit is set in
+/// `swept`, or for saves that only kept a count, the first `count`.
+fn mark_swept(active: usize, count: usize, swept: Option<u8>) -> Vec<bool> {
+    (0..active).map(|i| swept.map_or(i < count, |s| s & 1 << i != 0)).collect()
+}
+
 fn scatter(rng: &mut Rng, count: usize, sep: f32, taken: &mut Vec<V3>, accept: &dyn Fn(V3) -> bool) -> Vec<V3> {
     let mut out = Vec::new();
     let cos = sep.cos();
@@ -397,7 +416,18 @@ struct Volcano {
     n: V3,
     active: bool,
     puff: f32,
+    /// Builds up to 1, when it throws cinders; sweeping it sets it back.
+    pressure: f32,
+    /// Seconds of sweeping so far.
+    sweep: f32,
+    /// Whether it has been swept on this journey, for the task.
+    swept: bool,
 }
+
+/// Seconds of standing by a volcano to sweep it.
+const SWEEP: f32 = 2.5;
+/// How many sprouts B612 can hold before they stop spreading.
+const MAX_SPROUTS: usize = 14;
 
 struct Sprout {
     n: V3,
@@ -407,6 +437,8 @@ struct Sprout {
     grow0: f32,
     pulled: Option<f32>,
     phase: f32,
+    /// Seconds fully grown: a sprout left alone long enough seeds another.
+    seed: f32,
 }
 
 struct Rose {
@@ -597,6 +629,23 @@ pub struct World {
     /// but pulled sprouts grow back and can be pulled again.
     pub pulled: usize,
     pub pop: f32,
+    /// The task's parts: done so far, needed and what they are. `score`
+    /// and `total` are their sums.
+    pub parts: [usize; 3],
+    pub needs: [usize; 3],
+    pub labels: [T; 3],
+    dust: Dust,
+    caterpillars: Vec<Caterpillar>,
+    cinders: Vec<Cinder>,
+    /// The sprouts the planet starts with; those that spread are let go
+    /// when it starts over.
+    first_sprouts: usize,
+    /// Set by each update: stardust gathered, troubles seen to, and where a
+    /// trouble knocked the prince back from.
+    pub gathered: u32,
+    pub handled: u32,
+    pub bump: Option<V3>,
+    bump_cool: f32,
     /// The planet in miniature, ground and coarse scenery in one mesh, for
     /// the storybook: in colour, and as a blue ink sketch.
     pub mini: [Mesh; 2],
@@ -685,6 +734,17 @@ impl World {
             total: 0,
             pulled: 0,
             pop: 0.0,
+            parts: [0; 3],
+            needs: [0; 3],
+            labels: [T::Sprouts; 3],
+            dust: Dust::new(&[], 0),
+            caterpillars: Vec::new(),
+            cinders: Vec::new(),
+            first_sprouts: 0,
+            gathered: 0,
+            handled: 0,
+            bump: None,
+            bump_cool: 0.0,
             mini: unsafe { std::mem::zeroed() },
         };
         let mut props = Builder::default();
@@ -730,7 +790,15 @@ impl World {
                         &no_sway,
                         true,
                     );
-                    w.volcanoes.push(Volcano { top: base + n * (0.23 * k), n, active, puff: rng.f() });
+                    w.volcanoes.push(Volcano {
+                        top: base + n * (0.23 * k),
+                        n,
+                        active,
+                        puff: rng.f(),
+                        pressure: rng.range(0.0, 0.4),
+                        sweep: 0.0,
+                        swept: false,
+                    });
                 }
                 let rn = b612_spot(0.11, 0.06);
                 taken.push(rn);
@@ -796,7 +864,15 @@ impl World {
                     scatter(&mut rng, 7, ang(0.8), &mut taken, &|d| d.dot(V3::Y) > within(6.0) && off_path(d, 0.35))
                 {
                     let grow = rng.range(0.6, 1.0);
-                    w.sprouts.push(Sprout { n, pos: n * r(n), grow, grow0: grow, pulled: None, phase: rng.f() * TAU });
+                    w.sprouts.push(Sprout {
+                        n,
+                        pos: n * r(n),
+                        grow,
+                        grow0: grow,
+                        pulled: None,
+                        phase: rng.f() * TAU,
+                        seed: 0.0,
+                    });
                 }
                 // Woods and meadows thin out away from the path, so the far
                 // side of the planet stays open and cheap to draw.
@@ -855,7 +931,15 @@ impl World {
                         [(rng.next() % 5) as usize];
                     w.butterflies.push((d, rng.f() * TAU, c));
                 }
-                w.total = w.sprouts.len();
+                w.first_sprouts = w.sprouts.len();
+                // Caterpillars come over the hills, a little way from the rose.
+                let rose = w.rose.as_ref().map_or(spawn, |r| r.n);
+                for i in 0..3 {
+                    let axis = any_perp(rose).rotate(rose, 0.4 + i as f32 * TAU / 3.0);
+                    w.caterpillars.push(Caterpillar::new(rose.rotate(axis, ang(6.0)).norm(), i as f32 * 2.1));
+                }
+                w.needs = [10, 2, 3];
+                w.labels = [T::Sprouts, T::Volcanoes, T::Caterpillars];
             }
             Kind::Lamp => {
                 let ln = spot_at(rad, 2.6, 0.3);
@@ -1026,6 +1110,14 @@ impl World {
                 w.total = FOX_TRUST;
             }
         }
+        if kind != Kind::B612 {
+            w.needs = [w.total, 0, 0];
+            w.labels = [w.name().2; 3];
+        }
+        w.total = w.needs.iter().sum();
+        // Stardust over the whole planet.
+        let spots = scatter(&mut rng, 12, ang(2.2), &mut taken, &|_| true);
+        w.dust = Dust::new(&spots, kind as u64 + 17);
         let lo = props.lo.take().map(|b| *b).unwrap_or_default();
         let mut mini = coarse_ground.clone();
         mini.append(&lo);
@@ -1117,23 +1209,50 @@ impl World {
         self.lamp.as_ref().filter(|l| l.on > 0.01).map(|l| (l.head, l.on))
     }
 
-    /// Where autoplay should walk: a point, how near to stop, and whether
-    /// to stand still once there.
-    pub fn autoplay_target(&self, from: V3) -> Option<(V3, f32, bool)> {
+    /// Where autoplay should walk: the task's parts in turn, then the
+    /// character who set it.
+    pub fn autoplay_target(&self, from: V3) -> Option<Goal> {
+        let kind = self.kind;
+        let on = |n: V3| n * ground_r(kind, n);
+        let walk = |at: V3| Goal { at, arrive: 0.0, still: false, hop: false };
+        let dist = |a: &V3, b: &V3| (*a - from).len().total_cmp(&(*b - from).len());
+        // Stardust lying close by is picked up on the way, except while
+        // keeping still for the fox.
+        if self.kind != Kind::Desert {
+            if let Some(at) = self.dust.nearest(from, 2.5, &|n| ground_r(kind, n)) {
+                return Some(walk(at));
+            }
+        }
         match self.kind {
             Kind::B612 => {
-                let near = |a: &V3, b: &V3| (*a - from).len().total_cmp(&(*b - from).len());
-                let ready: Vec<V3> =
-                    self.sprouts.iter().filter(|s| s.pulled.is_none() && s.grow > 0.55).map(|s| s.pos).collect();
-                match ready.into_iter().min_by(near) {
-                    Some(p) => Some((p, 0.0, false)),
-                    None => self.rose.as_ref().map(|r| (r.pos, 0.55, true)),
+                let crawling = self.caterpillars.iter().filter(|c| c.crawling()).map(|c| on(c.n)).min_by(dist);
+                let ready =
+                    self.sprouts.iter().filter(|s| s.pulled.is_none() && s.grow > 0.55).map(|s| s.pos).min_by(dist);
+                if let Some(at) = crawling.filter(|_| self.parts[2] < self.needs[2]) {
+                    return Some(Goal { at, arrive: 0.0, still: false, hop: true });
+                }
+                if let Some(at) = ready.filter(|_| self.parts[0] < self.needs[0]) {
+                    return Some(walk(at));
+                }
+                if self.parts[1] < self.needs[1] {
+                    if let Some(v) = self.volcanoes.iter().find(|v| v.active && !v.swept) {
+                        let to = (from.norm() - v.n).flatten(v.n);
+                        let to = if to.len() < 1e-4 { any_perp(v.n) } else { to.norm() };
+                        let spot = v.n.rotate(v.n.cross(to).norm(), 0.75 / kind.radius());
+                        return Some(Goal { at: on(spot), arrive: 0.25, still: true, hop: false });
+                    }
+                }
+                match ready {
+                    Some(at) => Some(walk(at)),
+                    None => self.rose.as_ref().map(|r| Goal { at: r.pos, arrive: 0.55, still: true, hop: false }),
                 }
             }
             Kind::Lamp => None,
-            Kind::Desert => self.fox.as_ref().filter(|f| f.trust < FOX_TRUST).map(|f| {
-                let r = ground_r(self.kind, f.n);
-                (f.n * r, Fox::preferred_distance(f.trust) + 0.35, true)
+            Kind::Desert => self.fox.as_ref().filter(|f| f.trust < FOX_TRUST).map(|f| Goal {
+                at: on(f.n),
+                arrive: Fox::preferred_distance(f.trust) + 0.35,
+                still: true,
+                hop: false,
             }),
         }
     }
@@ -1142,16 +1261,41 @@ impl World {
     /// sprouts pulled, sunsets watched or the fox's trust. Nothing from the
     /// journey or autoplay before carries over: sprouts are as they first
     /// grew and the fox is back in its place.
-    pub fn restore(&mut self, score: usize) {
-        let s = score.min(self.total);
-        self.score = s;
+    /// `swept` lists the active volcanoes already swept, by their order
+    /// among the active ones; `None` (saves before it was kept) counts them
+    /// from the first.
+    pub fn restore(&mut self, parts: [usize; 3], swept: Option<u8>) {
+        let mut parts = parts;
+        let active = self.volcanoes.iter().filter(|v| v.active).count();
+        let marks = mark_swept(active, parts[1], swept);
+        if self.kind == Kind::B612 {
+            parts[1] = marks.iter().filter(|m| **m).count();
+        }
+        for (have, (saved, need)) in self.parts.iter_mut().zip(parts.into_iter().zip(self.needs)) {
+            *have = saved.min(need);
+        }
+        self.score = self.parts.iter().sum();
+        let s = self.score;
         self.pulled = 0;
+        self.sprouts.truncate(self.first_sprouts);
+        for (v, swept) in self.volcanoes.iter_mut().filter(|v| v.active).zip(marks) {
+            v.swept = swept;
+            v.sweep = 0.0;
+            v.pressure = 0.0;
+        }
+        for c in &mut self.caterpillars {
+            c.reset();
+        }
+        self.cinders.clear();
+        self.dust.reset();
+        self.bump_cool = 0.0;
         self.pop = 0.0;
         // Not "the sun was up": loading at night would count a sunset.
         self.last_e = UNSEEN;
         for sp in &mut self.sprouts {
             sp.grow = sp.grow0;
             sp.pulled = None;
+            sp.seed = 0.0;
         }
         if let Some(rose) = &mut self.rose {
             rose.near = false;
@@ -1161,6 +1305,28 @@ impl World {
             fox.trust = s;
             self.fox = Some(fox);
         }
+    }
+
+    /// The active volcanoes swept so far, bit `i` for the `i`th, for the save.
+    pub fn swept(&self) -> u8 {
+        self.volcanoes.iter().filter(|v| v.active).enumerate().filter(|(_, v)| v.swept).fold(0, |m, (i, _)| m | 1 << i)
+    }
+
+    /// Whether a crawling caterpillar is within `r` of `feet`: then A jumps
+    /// to land on it rather than talking to the rose beside it.
+    pub fn caterpillar_near(&self, feet: V3, r: f32) -> bool {
+        let kind = self.kind;
+        self.caterpillars.iter().filter(|c| c.crawling()).any(|c| (c.n * ground_r(kind, c.n) - feet).len() < r)
+    }
+
+    /// Caterpillars out and crawling.
+    pub fn crawling(&self) -> usize {
+        self.caterpillars.iter().filter(|c| c.crawling()).count()
+    }
+
+    /// Sprouts on the planet, pulled or not.
+    pub fn sprout_count(&self) -> usize {
+        self.sprouts.len()
     }
 
     /// Sprouts pulled up and not yet grown back.
@@ -1184,19 +1350,265 @@ impl World {
         }
     }
 
+    /// Sets the score of a planet whose task has one part.
     fn set_score(&mut self, s: usize) -> bool {
         let up = s > self.score;
         if up {
             self.pop = 1.0;
         }
         self.score = s;
+        self.parts[0] = s;
         up
+    }
+
+    /// Adds `k` to part `i` of the task, up to what it needs; whether that
+    /// counted.
+    fn add_part(&mut self, i: usize, k: usize) -> bool {
+        let was = self.parts[i];
+        self.parts[i] = (was + k).min(self.needs[i]);
+        self.score = self.parts.iter().sum();
+        let up = self.parts[i] > was;
+        if up {
+            self.pop = 1.0;
+        }
+        up
+    }
+
+    /// A trouble at `from` knocks the prince back, once in a while.
+    fn knock(&mut self, from: V3) {
+        if self.bump_cool <= 0.0 {
+            self.bump = Some(from);
+            self.bump_cool = 1.2;
+        }
+    }
+
+    /// Stardust the prince spilled at his feet, `n` motes.
+    pub fn spill(&mut self, feet: V3, n: usize) {
+        self.dust.scatter(feet.norm(), n, self.kind.radius());
+    }
+
+    /// B612's troubles: volcanoes building up and being swept, the cinders
+    /// they throw, sprouts spreading, and caterpillars making for the rose.
+    /// Returns true when a part of the task moved on.
+    fn update_troubles(&mut self, dt: f32, p: &PState, fx: &mut Fx, snd: &mut Sounds) -> bool {
+        let kind = self.kind;
+        let rad = kind.radius();
+        let ground = move |n: V3| ground_r(kind, n);
+        let mut scored = false;
+        let mut swept_now = Vec::new();
+        let mut erupt = Vec::new();
+        for (i, v) in self.volcanoes.iter_mut().enumerate().filter(|(_, v)| v.active) {
+            let base = v.n * ground(v.n);
+            if (p.feet - base).len() < 1.15 {
+                v.sweep += dt;
+                if self.rng.f() < dt * 10.0 {
+                    let side = any_perp(v.n).rotate(v.n, self.rng.range(0.0, TAU));
+                    fx.burst(
+                        base + side * 0.5 + v.n * 0.05,
+                        v.n,
+                        Burst {
+                            n: 3,
+                            speed: (0.2, 0.5),
+                            size: (0.03, 0.06),
+                            life: (0.4, 0.8),
+                            cols: &[rgb(0xB8A8A0), rgb(0x8E8896)],
+                            glow: false,
+                            grav: 1.0,
+                            drag: 1.5,
+                            aim: 0.5,
+                        },
+                    );
+                }
+                if v.sweep >= SWEEP {
+                    v.sweep = 0.0;
+                    v.pressure = -2.0;
+                    swept_now.push(i);
+                }
+            } else {
+                v.sweep = (v.sweep - dt * 0.5).max(0.0);
+            }
+            v.pressure += dt / 16.0;
+            if v.pressure >= 1.0 {
+                v.pressure = 0.0;
+                erupt.push(i);
+            }
+        }
+        for i in swept_now {
+            let v = &mut self.volcanoes[i];
+            let (n, first) = (v.n, !v.swept);
+            v.swept = true;
+            if first {
+                scored |= self.add_part(1, 1);
+            }
+            self.handled += 1;
+            self.dust.scatter(n, 3, rad);
+            fx.ring(n * ground(n), n, 1.1, 0.8, rgb(0xFFE9A8));
+            snd.play(Sfx::Chime(2), 1.0, 0.4);
+        }
+        for i in erupt {
+            let (top, n) = (self.volcanoes[i].top, self.volcanoes[i].n);
+            let me = p.feet.norm();
+            // One cinder is meant for a prince standing near.
+            let near = (p.feet - n * ground(n)).len() < 5.0;
+            for k in 0..5 {
+                let (from, dist) = if k == 0 && near { (me, (0.0, 0.4)) } else { (n, (1.2, 4.0)) };
+                let side = any_perp(from).rotate(from, self.rng.range(0.0, TAU));
+                let to = from.rotate(side, self.rng.range(dist.0, dist.1) / rad).norm();
+                self.cinders.push(Cinder { from: top, to, t: 0.0, dur: self.rng.range(1.5, 2.1) });
+            }
+            fx.burst(
+                top,
+                n,
+                Burst {
+                    n: 24,
+                    speed: (1.0, 2.4),
+                    size: (0.03, 0.07),
+                    life: (0.5, 1.1),
+                    cols: &[rgb(0xFF8A3D), rgb(0xFFD27A)],
+                    glow: true,
+                    grav: 2.5,
+                    drag: 0.6,
+                    aim: 0.7,
+                },
+            );
+            if near {
+                fx.shake = fx.shake.max(0.25);
+            }
+            snd.play(Sfx::Whoosh, 0.5, 0.5);
+        }
+        let mut landed = Vec::new();
+        for c in &mut self.cinders {
+            c.t += dt;
+            if c.landed() {
+                landed.push(c.to);
+            }
+        }
+        self.cinders.retain(|c| !c.landed());
+        for to in landed {
+            let at = to * ground(to);
+            fx.burst(
+                at,
+                to,
+                Burst {
+                    n: 14,
+                    speed: (0.4, 1.4),
+                    size: (0.03, 0.06),
+                    life: (0.3, 0.8),
+                    cols: &[rgb(0xFF7A2E), rgb(0xFFD27A), rgb(0x5A3A30)],
+                    glow: true,
+                    grav: 3.0,
+                    drag: 1.0,
+                    aim: 0.6,
+                },
+            );
+            fx.ring(at, to, 0.5, 0.5, rgb(0xFF9A50));
+            snd.play(Sfx::Pop, 0.6, 0.35);
+            if (p.feet - at).len() < 0.6 {
+                self.knock(at);
+            }
+        }
+        // Sprouts left to grow seed others nearby.
+        let mut seeds = Vec::new();
+        for s in self.sprouts.iter_mut().filter(|s| s.pulled.is_none() && s.grow >= 1.0) {
+            s.seed += dt;
+            if s.seed > 20.0 {
+                s.seed = 0.0;
+                seeds.push(s.n);
+            }
+        }
+        for n in seeds {
+            if self.sprouts.len() >= MAX_SPROUTS {
+                break;
+            }
+            let side = any_perp(n).rotate(n, self.rng.range(0.0, TAU));
+            let d = n.rotate(side, self.rng.range(0.7, 1.6) / rad).norm();
+            let clear = self.sprouts.iter().all(|o| (o.n - d).len() * rad > 0.45)
+                && self.rose.as_ref().is_none_or(|r| (r.n - d).len() * rad > 0.9)
+                && path_dist(d) > 0.35;
+            if clear {
+                let pos = d * ground(d);
+                let phase = self.rng.f() * TAU;
+                self.sprouts.push(Sprout { n: d, pos, grow: 0.0, grow0: 0.0, pulled: None, phase, seed: 0.0 });
+                fx.burst(
+                    pos,
+                    d,
+                    Burst {
+                        n: 8,
+                        speed: (0.2, 0.5),
+                        size: (0.02, 0.04),
+                        life: (0.4, 0.8),
+                        cols: &[rgb(0x7CC35A), rgb(0x8A6A4A)],
+                        glow: false,
+                        grav: 2.0,
+                        drag: 1.0,
+                        aim: 0.6,
+                    },
+                );
+            }
+        }
+        // Caterpillars: landed on, they turn into butterflies; walked into,
+        // they knock the prince back.
+        let goal = self.rose.as_ref().map_or(self.spawn, |r| r.n);
+        let mut stomped = Vec::new();
+        let mut bumped = None;
+        for (i, c) in self.caterpillars.iter_mut().enumerate() {
+            c.update(dt, goal, rad);
+            if !c.crawling() {
+                continue;
+            }
+            let at = c.n * ground(c.n);
+            let d = (p.feet - at).len();
+            if p.landed && d < 0.5 {
+                c.curl = Some(0.0);
+                stomped.push(i);
+            } else if p.grounded && d < 0.2 {
+                bumped = Some(at);
+            }
+        }
+        if let Some(at) = bumped {
+            self.knock(at);
+        }
+        for i in stomped {
+            let n = self.caterpillars[i].n;
+            let at = n * ground(n);
+            scored |= self.add_part(2, 1);
+            self.handled += 1;
+            self.dust.scatter(n, 3, rad);
+            let col = [rgb(0xFFF3A8), rgb(0xFFB0C8), rgb(0xA8D8FF)][i % 3];
+            if self.butterflies.len() < 60 {
+                let phase = self.rng.f() * TAU;
+                self.butterflies.push((n, phase, col));
+            }
+            fx.burst(
+                at + n * 0.1,
+                n,
+                Burst {
+                    n: 18,
+                    speed: (0.3, 1.0),
+                    size: (0.025, 0.05),
+                    life: (0.6, 1.2),
+                    cols: &[col, rgb(0xFFFFFF)],
+                    glow: true,
+                    grav: -0.3,
+                    drag: 1.5,
+                    aim: 0.5,
+                },
+            );
+            snd.play(Sfx::Chime(5), 1.2, 0.4);
+        }
+        scored
     }
 
     /// Advances the planet. Returns true when the prince achieved something.
     pub fn update(&mut self, dt: f32, t: f32, p: &PState, fx: &mut Fx, snd: &mut Sounds) -> bool {
         self.pop = (self.pop - dt * 2.5).max(0.0);
+        self.gathered = 0;
+        self.handled = 0;
+        self.bump = None;
+        self.bump_cool -= dt;
         let mut scored = false;
+        let kind = self.kind;
+        self.gathered = self.dust.update(dt, t, p.feet, &|n| ground_r(kind, n), fx, snd);
         let up = p.feet.norm();
         let sun = self.sun(t);
         let wind = self.pal.wind;
@@ -1272,8 +1684,10 @@ impl World {
                 }
                 self.pulled = pulled;
                 if pulled > 0 {
-                    scored |= self.set_score((self.score + pulled).min(self.total));
+                    scored |= self.add_part(0, pulled);
+                    self.dust.scatter(p.feet.norm(), pulled, self.kind.radius());
                 }
+                scored |= self.update_troubles(dt, p, fx, snd);
                 if let Some(rose) = &mut self.rose {
                     let d = (rose.pos - p.feet).len();
                     let near = d < 0.7;
@@ -1491,10 +1905,22 @@ impl World {
         }
         let wind = self.pal.wind;
         let ri = Ink::Radial;
+        let kind = self.kind;
+        let ground = move |n: V3| ground_r(kind, n);
+        let troubles = !crate::prof::skip("troubles");
+        // Too small to make out beyond a few steps.
+        let near = |n: V3| troubles && (n * ground(n) - cam).len() < 8.0;
+        for c in self.caterpillars.iter().filter(|c| near(c.n)) {
+            c.draw(gl, kit, &ground);
+        }
+        for c in self.cinders.iter().filter(|_| troubles) {
+            let at = c.pos(&ground);
+            gl.part(kit.ball, place(at, c.to, any_perp(c.to), v3(0.05, 0.05, 0.05)), rgb(0x6A2A18), 0.6, Ink::None);
+        }
         for v in &self.volcanoes {
             if v.active {
                 let x = any_perp(v.n);
-                let glow = 1.0 + 0.4 * (t * 3.0 + v.puff).sin();
+                let glow = 1.0 + 0.4 * (t * 3.0 + v.puff).sin() + v.pressure.max(0.0) * 1.5;
                 gl.part(
                     kit.ball,
                     place(v.top - v.n * 0.004, v.n, x, v3(0.07, 0.008, 0.07)),
@@ -1504,7 +1930,9 @@ impl World {
                 );
             }
         }
-        for s in &self.sprouts {
+        // Sprouts that spread are troubles too.
+        let shown = if troubles { self.sprouts.len() } else { self.first_sprouts };
+        for s in &self.sprouts[..shown.min(self.sprouts.len())] {
             let (pos, g, spin) = match s.pulled {
                 Some(age) if age < 0.9 => {
                     let u = age / 0.9;
@@ -1670,6 +2098,12 @@ impl World {
 
     /// Butterflies near the camera (see-through, inside `gl::alpha`).
     pub fn draw_alpha(&self, gl: &Gl, t: f32, cam: V3) {
+        let kind = self.kind;
+        if !self.cinders.is_empty() {
+            Sprites::begin(gl.sprite);
+            trouble::draw_cinder_shadows(&self.cinders, &move |n| ground_r(kind, n));
+            Sprites::end();
+        }
         if self.butterflies.is_empty() {
             return;
         }
@@ -1698,9 +2132,13 @@ impl World {
     pub fn draw_glow(&self, gl: &Gl, s: &Sprites, t: f32) {
         Sprites::begin(gl.sprite);
         for v in self.volcanoes.iter().filter(|v| v.active) {
-            let k = 0.8 + 0.2 * (t * 3.0 + v.puff).sin();
+            let k = (0.8 + 0.2 * (t * 3.0 + v.puff).sin()) * (1.0 + v.pressure.max(0.0));
             s.billboard(v.top + v.n * 0.03, 0.22 * k, rgba(rgb(0xFF8A3D), 0.45));
         }
+        let kind = self.kind;
+        let ground = move |n: V3| ground_r(kind, n);
+        self.dust.draw_glow(s, t, &ground);
+        trouble::draw_cinder_glow(&self.cinders, s, t, &ground);
         if let Some(r) = &self.rose {
             let k = 0.5 + 0.5 * (t * 2.0).sin();
             s.billboard(
@@ -1895,6 +2333,13 @@ fn draw_fox(gl: &Gl, kit: &Kit, f: &Fox, r: f32, t: f32) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_volcano_swept_is_the_one_restored() {
+        assert_eq!(mark_swept(2, 1, Some(0b10)), [false, true], "the second, swept first, stays swept");
+        assert_eq!(mark_swept(2, 2, Some(0)), [false, false], "the saved volcanoes win over the count");
+        assert_eq!(mark_swept(2, 1, None), [true, false], "an older save counts from the first");
+    }
+
     use super::*;
 
     #[test]
@@ -1985,7 +2430,13 @@ mod tests {
     #[test]
     fn the_fox_reaches_full_trust_while_the_player_waits_at_spawn() {
         let spawn = V3::Y;
-        let player = PState { feet: spawn * ground_r(Kind::Desert, spawn), face: any_perp(spawn), speed: 0.0 };
+        let player = PState {
+            feet: spawn * ground_r(Kind::Desert, spawn),
+            face: any_perp(spawn),
+            speed: 0.0,
+            grounded: true,
+            landed: false,
+        };
         let mut fox = Fox::new(spawn);
         let mut fx = Fx::new();
         let mut snd = Sounds::new(false);

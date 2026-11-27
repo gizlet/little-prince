@@ -12,6 +12,8 @@ A 3D game for [Gizlet OS](https://github.com/gizlet/os) handhelds such as the R3
 | --- | --- | --- |
 | ![Journeys](docs/screenshots/journeys.png) | ![Star chart](docs/screenshots/starmap.png) | ![Chapter](docs/screenshots/chapter.png) |
 
+![Troubles on B612: a volcano throws cinders, stardust floats over the grass](docs/screenshots/troubles.png)
+
 ## Credits
 
 - **The story** is Antoine de Saint-Exupéry's *Le Petit Prince* (1943). The planets follow the book: B612 with its volcanoes, rose and baobab sprouts, the lamplighter's planet, and the desert where the fox is tamed. The book is in the public domain in most countries but not everywhere, and "Le Petit Prince" is a registered trademark. Keep this demo non-commercial.
@@ -22,7 +24,7 @@ A 3D game for [Gizlet OS](https://github.com/gizlet/os) handhelds such as the R3
 
 | | |
 | --- | --- |
-| B612 | A planet 18 units in radius with rolling hills, a dirt path, 30,000 blades of grass parting around the hero, flowers, bushes, mossy rocks, three baobabs, smoking volcanoes, the rose under its glass, clouds and butterflies. Pull up the baobab sprouts. |
+| B612 | A planet 18 units in radius with rolling hills, a dirt path, 30,000 blades of grass parting around the hero, flowers, bushes, mossy rocks, three baobabs, smoking volcanoes, the rose under its glass, clouds and butterflies. Pull up the spreading baobab sprouts, sweep the volcanoes and turn the caterpillars into butterflies. |
 | The lamplighter's planet | The smallest, 15 units in radius, stony and bare, where a day lasts 14 seconds. The lamplighter lights his lamp at dusk and puts it out at dawn; the HUD counts the sunsets you watch. |
 | The desert | Earth, the largest at 25 units in radius: dunes, a wheat field, a crashed biplane and a fox that comes a little closer each time you stand still. |
 | The hero | The little prince's 27-bone rig with idle, walk, run, jump, landing and cheer, blended into each other and timed to the hero's speed so the feet do not slide, skinned on the CPU. |
@@ -53,7 +55,9 @@ cargo run --release
 
 The title, the journeys and the star map are pages of one storybook floating in the night. On the title its cover turns slowly; A opens it at the three journeys, each with its own bookmark: choose one to continue it, or an empty one to start; X twice moves the chosen journey aside (to `slotN.txt.old`). The game saves on arriving at a planet, on scoring, when the pause menu opens, on returning to the title and on quitting, and every minute. The settings hold the language, effects level, performance panel, volume and inverted camera, for all journeys.
 
-Each planet has someone to talk to and a task: on B612 the baobab sprouts are pulled up for the rose, the lamplighter wants company through three sunsets, and in the desert the fox is tamed by standing still while it comes closer. Walk up to them and press A; A moves the conversation on and B leaves it. X opens the book at the star chart: the planets drawn in colour once visited and as blue ink sketches before, joined by the birds' dotted routes. Left and right choose a planet and A turns to its chapter, with its story, its task and A to fly there; planets already visited can be flown to at any time, and the route to the next planet opens when the current planet's task is done. B turns back and X closes the book. Pages turn with a curling leaf, and cut straight over at effects level low.
+Each planet has someone to talk to and a task: on B612 the rose asks for ten baobab sprouts to be pulled up, both volcanoes to be swept (stand beside one for a moment) and the three caterpillars crawling towards her to be jumped on, which turns them into butterflies; the lamplighter wants company through three sunsets, and in the desert the fox is tamed by standing still while it comes closer. Walk up to them and press A; A moves the conversation on and B leaves it.
+
+Nothing in the game hurts the prince. Troubles left alone grow: sprouts left standing seed new ones, and an unswept volcano throws cinders, whose landing spots show as dark shadows first. Walking into a caterpillar or a cinder knocks him back and spills up to three of the stardust he carries, which glitters on the ground for a few seconds to be gathered again. Stardust floats over every planet, comes back a while after it is gathered, and is set free by every trouble seen to; the HUD shows how much he carries. X opens the book at the star chart: the planets drawn in colour once visited and as blue ink sketches before, joined by the birds' dotted routes. Left and right choose a planet and A turns to its chapter, with its story, its task and A to fly there; planets already visited can be flown to at any time, and the route to the next planet opens when the current planet's task is done. B turns back and X closes the book. Pages turn with a curling leaf, and cut straight over at effects level low.
 
 Left alone on the title for 12 seconds, it plays by itself (autoplay) and moves on to the next planet every 26 seconds. Hold Select + Start for two seconds to quit.
 
@@ -70,10 +74,10 @@ Left alone on the title for 12 seconds, it plays by itself (autoplay) and moves 
 | `LITTLEPRINCE_STATS=0` | Hide the stats panel |
 | `LITTLEPRINCE_HERO=Name` | Load `assets/hero/Name.glb` instead of `little-prince` (one skin of at most 64 bones, UVs into one texture, and animations named `Idle`, `Walk`, `Run`, `Jump`, `Land` and `Cheer`, or KayKit Adventurers 1.0's names) |
 | `LITTLEPRINCE_PROFILE=1` | Print the frame time per stage (waiting for the GPU after each) and the triangles drawn, every 3 seconds; `2` prints only the frame time |
-| `LITTLEPRINCE_SKIP=hero,heroink,skin,world,grass,props,flowers,backdrop,sky,alpha,glass,glow,bloom` | Leave parts out, for measuring their cost |
+| `LITTLEPRINCE_SKIP=hero,heroink,skin,world,grass,props,flowers,troubles,backdrop,sky,alpha,glass,glow,bloom` | Leave parts out, for measuring their cost |
 | `LITTLEPRINCE_FPS=60` | Frame rate cap; `0` leaves the pace to the display |
 | `LITTLEPRINCE_SECONDS=80` | Quit after that many seconds, for scripted runs |
-| `LITTLEPRINCE_CAPTURE=FILE.png` | Render one frame to a PNG and exit, saving nothing; `LITTLEPRINCE_SCENE` is `title` (or `cover`), `b612`, `lamp`, `desert`, `fly`, `journeys`, `pause`, `settings`, `statistics`, `starmap`, `chapter`, `turn` (a page halfway over), `dialog`, `model` or `icon`, and `LITTLEPRINCE_AT` the seconds of autoplay before it |
+| `LITTLEPRINCE_CAPTURE=FILE.png` | Render one frame to a PNG and exit, saving nothing; `LITTLEPRINCE_SCENE` is `title` (or `cover`), `b612`, `lamp`, `desert`, `fly`, `journeys`, `pause`, `settings`, `statistics`, `starmap`, `chapter`, `turn` (a page halfway over), `dialog`, `troubles` (a volcano throwing cinders, with stardust in hand), `model` or `icon`, and `LITTLEPRINCE_AT` the seconds of autoplay before it |
 | `LITTLEPRINCE_SCRIPT=FILE` | Replay the button presses in FILE at 60 steps a second, checking the game's state as it goes; exits with status 1 if a check fails. `assist SECS` lets the game play the planet's task for that long (format in `src/script.rs`) |
 
 ```sh
@@ -135,6 +139,7 @@ Do not pin the GPU clock by hand: setting `min_freq` of `/sys/class/devfreq/ff40
 | `src/sound.rs` | Synthesized sound effects |
 | `src/hud.rs`, `src/text.rs` | The HUD and menus, strings in Chinese and English, font atlases |
 | `src/dialog.rs` | Conversations and their lines |
+| `src/trouble.rs` | Stardust, caterpillars and cinders |
 | `src/book.rs` | The storybook: its cover, the journeys, the star chart and the chapters, paper made at start-up, page turns and the planets in miniature |
 | `src/save.rs` | Journeys and settings on disk |
 | `src/menu.rs` | The journeys, pause, settings, statistics, star chart and chapter pages and what their buttons do |
