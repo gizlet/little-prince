@@ -53,6 +53,15 @@ impl Kind {
 }
 
 const FOX_TRUST: usize = 5;
+
+/// The sun's height before the prince has seen it, on arriving or loading.
+const UNSEEN: f32 = 0.0;
+
+/// Whether the sun went down between the last frame's height above the
+/// prince, `before`, and this one's, `now`. After `UNSEEN` nothing counts.
+fn sets(before: f32, now: f32) -> bool {
+    before > 0.0 && now <= 0.0
+}
 /// Up to `CLOSE` from the camera a cell has all its grass, flowers and full
 /// scenery; up to `NEAR` half the grass; up to `MID` only coarser scenery;
 /// beyond, only the ground. Groups of four cells all beyond `GROUP` are
@@ -667,7 +676,7 @@ impl World {
             stars,
             shooting: Vec::new(),
             shoot_t: 1.0,
-            last_e: 1.0,
+            last_e: UNSEEN,
             rng: Rng::new(kind as u64 + 3),
             score: 0,
             total: 0,
@@ -1121,7 +1130,8 @@ impl World {
         self.score = s;
         self.pulled = 0;
         self.pop = 0.0;
-        self.last_e = 1.0;
+        // Not "the sun was up": loading at night would count a sunset.
+        self.last_e = UNSEEN;
         for sp in &mut self.sprouts {
             sp.grow = sp.grow0;
             sp.pulled = None;
@@ -1302,7 +1312,7 @@ impl World {
                 }
                 // Count the sunsets the prince sees where he stands.
                 let e = up.dot(sun);
-                if self.last_e > 0.0 && e <= 0.0 {
+                if sets(self.last_e, e) {
                     scored |= self.set_score((self.score + 1).min(self.total));
                     snd.play(Sfx::Chime(0), 0.8, 0.3);
                 }
@@ -1906,6 +1916,16 @@ mod tests {
     #[test]
     fn the_lamplighters_day_still_lasts_14_seconds() {
         assert_eq!(Kind::Lamp.day(), 14.0);
+    }
+
+    #[test]
+    fn arriving_or_loading_at_night_is_not_a_sunset() {
+        // The first frame after arriving or loading only notes the sun.
+        assert!(!sets(UNSEEN, -0.6));
+        assert!(!sets(UNSEEN, 0.4));
+        assert!(sets(0.02, -0.01));
+        assert!(!sets(-0.2, -0.3), "still night");
+        assert!(!sets(0.3, 0.2), "still day");
     }
 
     #[test]
