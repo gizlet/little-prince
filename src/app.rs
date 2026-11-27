@@ -132,6 +132,8 @@ pub struct App {
 
 /// How near a character the traveller must be to talk to it.
 const TALK: f32 = 1.2;
+/// Within this of a crawling caterpillar A jumps, even beside the rose.
+const STOMP: f32 = 0.9;
 
 /// Seconds between saves while playing, besides those on arriving, scoring,
 /// opening the menu and quitting.
@@ -309,6 +311,9 @@ impl App {
         for (i, w) in self.worlds.iter().enumerate() {
             self.journey.scores[i] = w.score;
             self.journey.parts[i] = w.parts;
+            if w.kind == Kind::B612 {
+                self.journey.swept = Some(w.swept());
+            }
         }
         let ok = self.store.save_journey(slot, &self.journey);
         if ok {
@@ -347,8 +352,11 @@ impl App {
     }
 
     /// Whether the planet's character is near enough to talk to.
+    /// Whether A would talk: near the planet's character, and with no
+    /// caterpillar close enough that A is wanted for landing on it.
     pub fn near_speaker(&self) -> bool {
-        self.world().speaker().is_some_and(|s| (s - self.player.feet()).len() < TALK)
+        let feet = self.player.feet();
+        self.world().speaker().is_some_and(|s| (s - feet).len() < TALK) && !self.world().caterpillar_near(feet, STOMP)
     }
 
     fn talk(&mut self) {
@@ -435,7 +443,8 @@ impl App {
             }
         };
         for (w, parts) in self.worlds.iter_mut().zip(j.parts) {
-            w.restore(parts);
+            let swept = if w.kind == Kind::B612 { j.swept } else { None };
+            w.restore(parts, swept);
         }
         self.menu = None;
         self.autoplay = false;

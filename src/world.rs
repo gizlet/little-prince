@@ -202,6 +202,12 @@ fn spot_at(r: f32, f: f32, s: f32) -> V3 {
 
 /// Picks `count` directions at least `sep` radians from each other and from
 /// `taken`.
+/// Which of `active` volcanoes are swept: those whose bit is set in
+/// `swept`, or for saves that only kept a count, the first `count`.
+fn mark_swept(active: usize, count: usize, swept: Option<u8>) -> Vec<bool> {
+    (0..active).map(|i| swept.map_or(i < count, |s| s & 1 << i != 0)).collect()
+}
+
 fn scatter(rng: &mut Rng, count: usize, sep: f32, taken: &mut Vec<V3>, accept: &dyn Fn(V3) -> bool) -> Vec<V3> {
     let mut out = Vec::new();
     let cos = sep.cos();
@@ -1255,7 +1261,16 @@ impl World {
     /// sprouts pulled, sunsets watched or the fox's trust. Nothing from the
     /// journey or autoplay before carries over: sprouts are as they first
     /// grew and the fox is back in its place.
-    pub fn restore(&mut self, parts: [usize; 3]) {
+    /// `swept` lists the active volcanoes already swept, by their order
+    /// among the active ones; `None` (saves before it was kept) counts them
+    /// from the first.
+    pub fn restore(&mut self, parts: [usize; 3], swept: Option<u8>) {
+        let mut parts = parts;
+        let active = self.volcanoes.iter().filter(|v| v.active).count();
+        let marks = mark_swept(active, parts[1], swept);
+        if self.kind == Kind::B612 {
+            parts[1] = marks.iter().filter(|m| **m).count();
+        }
         for (have, (saved, need)) in self.parts.iter_mut().zip(parts.into_iter().zip(self.needs)) {
             *have = saved.min(need);
         }
@@ -1263,10 +1278,8 @@ impl World {
         let s = self.score;
         self.pulled = 0;
         self.sprouts.truncate(self.first_sprouts);
-        let mut swept = self.parts[1];
-        for v in self.volcanoes.iter_mut().filter(|v| v.active) {
-            v.swept = swept > 0;
-            swept = swept.saturating_sub(1);
+        for (v, swept) in self.volcanoes.iter_mut().filter(|v| v.active).zip(marks) {
+            v.swept = swept;
             v.sweep = 0.0;
             v.pressure = 0.0;
         }
@@ -1292,6 +1305,18 @@ impl World {
             fox.trust = s;
             self.fox = Some(fox);
         }
+    }
+
+    /// The active volcanoes swept so far, bit `i` for the `i`th, for the save.
+    pub fn swept(&self) -> u8 {
+        self.volcanoes.iter().filter(|v| v.active).enumerate().filter(|(_, v)| v.swept).fold(0, |m, (i, _)| m | 1 << i)
+    }
+
+    /// Whether a crawling caterpillar is within `r` of `feet`: then A jumps
+    /// to land on it rather than talking to the rose beside it.
+    pub fn caterpillar_near(&self, feet: V3, r: f32) -> bool {
+        let kind = self.kind;
+        self.caterpillars.iter().filter(|c| c.crawling()).any(|c| (c.n * ground_r(kind, c.n) - feet).len() < r)
     }
 
     /// Caterpillars out and crawling.
@@ -2308,6 +2333,13 @@ fn draw_fox(gl: &Gl, kit: &Kit, f: &Fox, r: f32, t: f32) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_volcano_swept_is_the_one_restored() {
+        assert_eq!(mark_swept(2, 1, Some(0b10)), [false, true], "the second, swept first, stays swept");
+        assert_eq!(mark_swept(2, 2, Some(0)), [false, false], "the saved volcanoes win over the count");
+        assert_eq!(mark_swept(2, 1, None), [true, false], "an older save counts from the first");
+    }
+
     use super::*;
 
     #[test]

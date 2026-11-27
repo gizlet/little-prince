@@ -65,6 +65,9 @@ pub struct Journey {
     pub scores: [usize; 3],
     /// Each planet's task in parts (B612: sprouts, volcanoes, caterpillars).
     pub parts: [[usize; 3]; 3],
+    /// B612's active volcanoes swept, bit `i` for the `i`th; `None` in
+    /// saves from before it was kept.
+    pub swept: Option<u8>,
     /// Stardust carried.
     pub stardust: u32,
     pub stats: Stats,
@@ -118,6 +121,11 @@ impl Journey {
                 "troubles" => v.parse().map(|x| j.stats.troubles = x).is_ok(),
                 "bumps" => v.parse().map(|x| j.stats.bumps = x).is_ok(),
                 "stardust" => v.parse().map(|x| j.stardust = x).is_ok(),
+                "swept" => {
+                    let list: Option<Vec<u8>> =
+                        v.split_whitespace().map(|x| x.parse().ok().filter(|i: &u8| *i < 8)).collect();
+                    list.map(|l| j.swept = Some(l.iter().fold(0, |m, i| m | 1 << i))).is_some()
+                }
                 _ => match k.split_once('.').and_then(|(p, key)| Some((PLANETS.iter().position(|n| *n == p)?, key))) {
                     Some((i, "score")) => v.parse().map(|x| j.scores[i] = x).is_ok(),
                     Some((i, "parts")) => {
@@ -160,6 +168,10 @@ impl Journey {
             out += &format!("{p}.score {score}\n{p}.parts {} {} {}\n", parts[0], parts[1], parts[2]);
         }
         out += &format!("stardust {}\ntroubles {}\nbumps {}\n", self.stardust, s.troubles, s.bumps);
+        if let Some(swept) = self.swept {
+            let list: Vec<String> = (0..8).filter(|i| swept & 1 << i != 0).map(|i| i.to_string()).collect();
+            out += &format!("swept {}\n", list.join(" "));
+        }
         out += &format!(
             "time {:.1}\ndistance {:.1}\njumps {}\nsunsets {}\nsprouts {}\nflights {}\n",
             s.time, s.distance, s.jumps, s.sunsets, s.sprouts, s.flights
@@ -357,6 +369,7 @@ mod tests {
         j.scores = [5, 12, 0];
         j.parts = [[3, 1, 1], [12, 0, 0], [0, 0, 0]];
         j.stardust = 17;
+        j.swept = Some(0b10);
         j.stats = Stats {
             time: 321.5,
             distance: 1234.5,
