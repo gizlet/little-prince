@@ -133,6 +133,9 @@ pub struct Controls {
     swap_ab: bool,
     /// Buttons a `LITTLEPRINCE_SCRIPT` replay holds down.
     pub scripted: Vec<Button>,
+    /// During a replay only its buttons count: a key or gamepad touched
+    /// meanwhile would take over autoplay and change what is checked.
+    pub replay: bool,
     #[cfg(all(target_os = "linux", feature = "gizlet-os"))]
     evdev: crate::evdev::Evdev,
 }
@@ -148,6 +151,7 @@ impl Controls {
             look: (0.0, 0.0),
             swap_ab: std::env::var("GIZLET_SWAP_AB").is_ok_and(|v| v == "1"),
             scripted: Vec::new(),
+            replay: false,
             #[cfg(all(target_os = "linux", feature = "gizlet-os"))]
             evdev: crate::evdev::Evdev::default(),
         }
@@ -156,6 +160,21 @@ impl Controls {
     #[cfg_attr(not(all(target_os = "linux", feature = "gizlet-os")), allow(unused_variables))]
     pub fn poll(&mut self, dt: f32, time: f64) {
         let mut pad = RawPad::default();
+        if !self.replay {
+            self.read_devices(&mut pad, time);
+        }
+        if self.swap_ab {
+            pad.buttons.swap(Button::A as usize, Button::B as usize);
+        }
+        for b in &self.scripted {
+            pad.set(*b);
+        }
+        self.apply(pad, dt);
+    }
+
+    /// The keyboard, gamepads and the handheld's own buttons.
+    #[cfg_attr(not(all(target_os = "linux", feature = "gizlet-os")), allow(unused_variables))]
+    fn read_devices(&mut self, pad: &mut RawPad, time: f64) {
         unsafe {
             for (k, b) in KEYS {
                 if ffi::IsKeyDown(k as i32) {
@@ -166,7 +185,7 @@ impl Controls {
         #[cfg(all(target_os = "linux", feature = "gizlet-os"))]
         let handheld = {
             self.evdev.poll(time);
-            self.evdev.state(&mut pad)
+            self.evdev.state(pad)
         };
         #[cfg(not(all(target_os = "linux", feature = "gizlet-os")))]
         let handheld = false;
@@ -192,12 +211,9 @@ impl Controls {
                 }
             }
         }
-        if self.swap_ab {
-            pad.buttons.swap(Button::A as usize, Button::B as usize);
-        }
-        for b in &self.scripted {
-            pad.set(*b);
-        }
+    }
+
+    fn apply(&mut self, mut pad: RawPad, dt: f32) {
         let (x, y) = (pad.axes[0], pad.axes[1]);
         self.stick = walking_stick(x, y);
         // The right stick turns the camera; past the dead zone it ramps up

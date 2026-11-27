@@ -143,6 +143,7 @@ fn main() {
         let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("littleprince: cannot read {path}: {e}"));
         script::Player::new(script::parse(&text).unwrap_or_else(|e| panic!("littleprince: {path}: {e}")))
     });
+    controls.replay = replay.is_some();
     let mut steps = 0u32;
     while !unsafe { ffi::WindowShouldClose() } && !app.quit {
         let frame = prof::start_frame();
