@@ -265,6 +265,18 @@ pub struct Store {
     pub failed: bool,
 }
 
+/// Makes a rename in `dir` durable. On Unix the folder itself is synced; Windows cannot open a
+/// folder as a file (and NTFS journals renames), so there it is a no-op.
+#[cfg(unix)]
+fn sync_dir(dir: &std::path::Path) -> std::io::Result<()> {
+    std::fs::File::open(dir)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_dir(_dir: &std::path::Path) -> std::io::Result<()> {
+    Ok(())
+}
+
 impl Store {
     pub fn from_env(enabled: bool) -> Store {
         let dir = std::env::var_os("GIZLET_SAVE_DIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("save"));
@@ -299,7 +311,7 @@ impl Store {
             }
             std::fs::rename(&tmp, dir.join(name))?;
             // The rename only survives a power cut once the folder is synced.
-            std::fs::File::open(dir)?.sync_all()
+            sync_dir(dir)
         })();
         if let Err(e) = &ok {
             eprintln!("littleprince: could not save {name}: {e}");
@@ -337,7 +349,7 @@ impl Store {
         let Some(dir) = &self.dir else { return true };
         let name = Self::slot_name(slot);
         let ok = match std::fs::rename(dir.join(&name), dir.join(format!("{name}.old"))) {
-            Ok(()) => std::fs::File::open(dir).and_then(|d| d.sync_all()),
+            Ok(()) => sync_dir(dir),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e),
         };
