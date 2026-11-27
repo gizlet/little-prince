@@ -52,6 +52,8 @@ pub struct Journey {
     /// The planet the traveller is on, an index into `PLANETS`.
     pub planet: usize,
     pub visited: [bool; 3],
+    /// The planets whose task is done: it opens the route to the next.
+    pub done: [bool; 3],
     /// Each planet's score: sprouts pulled on B612, sunsets watched on the
     /// lamplighter's planet, the fox's trust in the desert.
     pub scores: [usize; 3],
@@ -88,6 +90,14 @@ impl Journey {
                     }
                     true
                 }
+                "done" => {
+                    for name in v.split_whitespace() {
+                        if let Some(i) = PLANETS.iter().position(|p| *p == name) {
+                            j.done[i] = true;
+                        }
+                    }
+                    true
+                }
                 "time" => v.parse().map(|x| j.stats.time = x).is_ok(),
                 "distance" => v.parse().map(|x| j.stats.distance = x).is_ok(),
                 "jumps" => v.parse().map(|x| j.stats.jumps = x).is_ok(),
@@ -119,6 +129,8 @@ impl Journey {
             PLANETS[self.planet],
             visited.join(" ")
         );
+        let done: Vec<&str> = PLANETS.iter().zip(self.done).filter(|(_, d)| *d).map(|(p, _)| *p).collect();
+        out += &format!("done {}\n", done.join(" "));
         for (p, score) in PLANETS.iter().zip(self.scores) {
             out += &format!("{p}.score {score}\n");
         }
@@ -315,6 +327,7 @@ mod tests {
         let mut j = Journey::start();
         j.planet = 1;
         j.visited = [true, true, false];
+        j.done = [true, false, false];
         j.scores = [5, 12, 0];
         j.stats = Stats { time: 321.5, distance: 1234.5, jumps: 40, sunsets: 13, sprouts: 9, flights: 2 };
         j

@@ -21,6 +21,10 @@ use crate::input::Button;
 pub enum Cmd {
     Press(Button, f32),
     Check(String, Op, String),
+    /// Lets the traveller see to the planet's task by itself, as autoplay
+    /// does, for so many seconds, then wait by the character who set it;
+    /// the journey still counts.
+    Assist(f32),
     Quit,
 }
 
@@ -82,6 +86,7 @@ pub fn parse(text: &str) -> Result<Vec<Line>, String> {
                 };
                 Cmd::Check(name.to_string(), op, value.to_string())
             }
+            ["assist", secs] => Cmd::Assist(secs.parse().map_err(|_| bad())?),
             ["quit"] => Cmd::Quit,
             _ => return Err(bad()),
         };
@@ -118,13 +123,25 @@ pub struct Player {
     /// Buttons held and until when.
     held: Vec<(Button, f32)>,
     pub failures: usize,
+    assist_until: f32,
+    /// Whether an `assist` is under way.
+    pub assist: bool,
     pub checks: usize,
     pub done: bool,
 }
 
 impl Player {
     pub fn new(lines: Vec<Line>) -> Player {
-        Player { lines, next: 0, held: Vec::new(), failures: 0, checks: 0, done: false }
+        Player {
+            lines,
+            next: 0,
+            held: Vec::new(),
+            failures: 0,
+            assist_until: 0.0,
+            assist: false,
+            checks: 0,
+            done: false,
+        }
     }
 
     /// Runs the commands due by `now`: `probe` reports a named value. Returns
@@ -144,12 +161,14 @@ impl Player {
                         eprintln!("script: FAIL line {}: {name} {op:?} {value}, but it is {actual}", l.line);
                     }
                 }
+                Cmd::Assist(secs) => self.assist_until = now + secs,
                 Cmd::Quit => self.done = true,
             }
             self.next += 1;
         }
         self.held.retain(|(_, until)| *until > now);
-        if self.next >= self.lines.len() && self.held.is_empty() {
+        self.assist = self.assist_until > now;
+        if self.next >= self.lines.len() && self.held.is_empty() && !self.assist {
             self.done = true;
         }
         self.held.iter().map(|(b, _)| *b).collect()

@@ -39,8 +39,8 @@ cargo run --release
 | Keys | Button | Action |
 | --- | --- | --- |
 | Arrows or WASD | D-pad / stick | Walk |
-| Space, Enter or K | A | Jump; on the title, choose a journey; in menus, choose |
-| I | X | Fly to the next planet |
+| Space, Enter or K | A | Jump; talk to someone nearby; on the title, choose a journey; in menus, choose |
+| I | X | Star map |
 | Q / E, R / F | Right stick | Turn the camera left and right, up and down |
 | U | Y | Effects: high, mid, low |
 | Tab | Select | Statistics |
@@ -48,6 +48,8 @@ cargo run --release
 | Backspace or J | B | Back, in menus |
 
 Pressing A on the title opens the three journeys: choose one to continue it, or an empty one to start; X twice moves the chosen journey aside (to `slotN.txt.old`). The game saves on arriving at a planet, on scoring, when the pause menu opens, on returning to the title and on quitting, and every minute. The settings hold the language, effects level, performance panel, volume and inverted camera, for all journeys.
+
+Each planet has someone to talk to and a task: on B612 the baobab sprouts are pulled up for the rose, the lamplighter wants company through three sunsets, and in the desert the fox is tamed by standing still while it comes closer. Walk up to them and press A; A moves the conversation on and B leaves it. X opens the star map: planets already visited can be flown to at any time, and the route to the next planet opens when the current planet's task is done.
 
 Left alone on the title for 12 seconds, it plays by itself (autoplay) and moves on to the next planet every 26 seconds. Hold Select + Start for two seconds to quit.
 
@@ -67,15 +69,15 @@ Left alone on the title for 12 seconds, it plays by itself (autoplay) and moves 
 | `LITTLEPRINCE_SKIP=hero,heroink,skin,world,grass,props,flowers,backdrop,sky,alpha,glass,glow,bloom` | Leave parts out, for measuring their cost |
 | `LITTLEPRINCE_FPS=60` | Frame rate cap; `0` leaves the pace to the display |
 | `LITTLEPRINCE_SECONDS=80` | Quit after that many seconds, for scripted runs |
-| `LITTLEPRINCE_CAPTURE=FILE.png` | Render one frame to a PNG and exit, saving nothing; `LITTLEPRINCE_SCENE` is `title`, `b612`, `lamp`, `desert`, `fly`, `journeys`, `pause`, `settings`, `statistics`, `model` or `icon`, and `LITTLEPRINCE_AT` the seconds of autoplay before it |
-| `LITTLEPRINCE_SCRIPT=FILE` | Replay the button presses in FILE at 60 steps a second, checking the game's state as it goes; exits with status 1 if a check fails (format in `src/script.rs`) |
+| `LITTLEPRINCE_CAPTURE=FILE.png` | Render one frame to a PNG and exit, saving nothing; `LITTLEPRINCE_SCENE` is `title`, `b612`, `lamp`, `desert`, `fly`, `journeys`, `pause`, `settings`, `statistics`, `starmap`, `dialog`, `model` or `icon`, and `LITTLEPRINCE_AT` the seconds of autoplay before it |
+| `LITTLEPRINCE_SCRIPT=FILE` | Replay the button presses in FILE at 60 steps a second, checking the game's state as it goes; exits with status 1 if a check fails. `assist SECS` lets the game play the planet's task for that long (format in `src/script.rs`) |
 
 ```sh
 cargo test
 scripts/play-tests.sh
 ```
 
-`scripts/play-tests.sh` plays the button replays in `tests/scripts` on the desktop build, each group of them on a fresh save folder: starting a journey, coming back to it, deleting it.
+`scripts/play-tests.sh` plays the button replays in `tests/scripts` on the desktop build, each group of them on a fresh save folder: starting a journey, coming back to it, deleting it, and finishing the three planets' tasks in turn.
 
 ## Run on Gizlet OS
 
@@ -128,8 +130,9 @@ Do not pin the GPU clock by hand: setting `min_freq` of `/sys/class/devfreq/ff40
 | `src/fx.rs` | Particles and ripples |
 | `src/sound.rs` | Synthesized sound effects |
 | `src/hud.rs`, `src/text.rs` | The HUD and menus, strings in Chinese and English, font atlases |
+| `src/dialog.rs` | Conversations and their lines |
 | `src/save.rs` | Journeys and settings on disk |
-| `src/menu.rs` | The journeys, pause, settings and statistics pages and what their buttons do |
+| `src/menu.rs` | The journeys, pause, settings, statistics and star map pages and what their buttons do |
 | `src/script.rs`, `tests/scripts`, `scripts/play-tests.sh` | Button replays and the ones played as tests |
 | `src/stats.rs` | CPU, memory, temperature and clock readings |
 | `src/prof.rs` | The frame profiler |

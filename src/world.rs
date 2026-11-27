@@ -898,7 +898,8 @@ impl World {
                     (0.04, 0.1),
                     &[rgb(0x8FB070), rgb(0xA0BE7A)],
                 );
-                w.total = 44;
+                // Three sunsets, watched where the lamplighter can see them.
+                w.total = 3;
             }
             Kind::Desert => {
                 // The biplane, nose down in the sand.
@@ -1149,6 +1150,22 @@ impl World {
     /// Sprouts pulled up and not yet grown back.
     pub fn sprouts_out(&self) -> usize {
         self.sprouts.iter().filter(|s| s.pulled.is_some()).count()
+    }
+
+    /// Whether the planet's task asks for nothing more: its score is full.
+    /// Talking to its character then completes it.
+    pub fn ready(&self) -> bool {
+        self.total > 0 && self.score >= self.total
+    }
+
+    /// Where the planet's character stands: the rose, the lamplighter or
+    /// the fox.
+    pub fn speaker(&self) -> Option<V3> {
+        match self.kind {
+            Kind::B612 => self.rose.as_ref().map(|r| r.pos),
+            Kind::Lamp => self.keeper.as_ref().map(|k| k.pos),
+            Kind::Desert => self.fox.as_ref().map(|f| f.n * ground_r(self.kind, f.n)),
+        }
     }
 
     fn set_score(&mut self, s: usize) -> bool {

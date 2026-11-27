@@ -3,6 +3,7 @@
 //! autopilot, and turning the prince's steps, jumps and landings into dust,
 //! rings and sound.
 
+use crate::dialog::{Dialog, Finish};
 use crate::fx::{Burst, Fx};
 use crate::gl::{self, lighten, mix, rgb, rgba, Gl, Ink, Lighting, Post, Sprites};
 use crate::hero::{Hero, Motion};
@@ -117,7 +118,15 @@ pub struct App {
     /// Seconds since the game started, running on while play is paused:
     /// for refreshing the HUD.
     pub clock: f32,
+    /// The conversation on screen; the traveller stands still meanwhile.
+    pub dialog: Option<Dialog>,
+    /// A replay's `assist`: the traveller sees to the planet's task by
+    /// itself, talking to its character when the task is ready.
+    pub assist: bool,
 }
+
+/// How near a character the traveller must be to talk to it.
+const TALK: f32 = 1.2;
 
 /// Seconds between saves while playing, besides those on arriving, scoring,
 /// opening the menu and quitting.
@@ -197,6 +206,8 @@ impl App {
             save_t: 0.0,
             sun_e: 0.0,
             clock: 0.0,
+            dialog: None,
+            assist: false,
         }
     }
 
@@ -227,9 +238,18 @@ impl App {
             "save-failed" => (self.store.failed as u8).to_string(),
             "pulled-now" => self.world().sprouts_out().to_string(),
             "flight-pose" => self.player.reach_target.to_string(),
+            "dialog" => self.dialog.as_ref().map_or("none".into(), |d| format!("{:?}", d.speaker).to_lowercase()),
+            "ready" => (self.world().ready() as u8).to_string(),
+            "near" => (self.near_speaker() as u8).to_string(),
             _ => {
                 if let Some(p) = name.strip_prefix("score.").and_then(planet) {
                     return self.worlds[p].score.to_string();
+                }
+                if let Some(p) = name.strip_prefix("done.").and_then(planet) {
+                    return (self.journey.done[p] as u8).to_string();
+                }
+                if let Some(p) = name.strip_prefix("open.").and_then(planet) {
+                    return (self.route_open(p) as u8).to_string();
                 }
                 // `saved.N` is whether journey N is on disk, `saved.N.KEY`
                 // its planet or a statistic as written there.
@@ -289,9 +309,89 @@ impl App {
                 self.save_now();
                 0
             }
+            Page::StarMap => self.cur,
             _ => 0,
         };
         self.menu = Some(Menu::open(page, row));
+    }
+
+    /// Whether the birds can take the traveller to planet `p`: B612, any
+    /// planet visited before, or the next one once a task is done.
+    pub fn route_open(&self, p: usize) -> bool {
+        p == 0 || self.journey.visited[p] || self.journey.done[p - 1]
+    }
+
+    /// Whether the planet's character is near enough to talk to.
+    pub fn near_speaker(&self) -> bool {
+        self.world().speaker().is_some_and(|s| (s - self.player.feet()).len() < TALK)
+    }
+
+    fn talk(&mut self) {
+        let p = self.cur;
+        let w = self.world();
+        self.dialog = Some(Dialog::with(w.kind, p, self.journey.done[p], w.ready()));
+        self.snd.play(Sfx::Chime(4), 1.0, 0.35);
+    }
+
+    /// Shows the rest of the line or the next one; finishing the
+    /// conversation may complete the planet's task.
+    fn advance_dialog(&mut self) {
+        let lang = self.lang;
+        let Some(d) = &mut self.dialog else { return };
+        if d.press(lang) {
+            let finish = d.finish;
+            self.dialog = None;
+            if let Finish::Complete(p) = finish {
+                self.complete(p);
+            }
+        }
+    }
+
+    fn complete(&mut self, p: usize) {
+        if self.journey.done[p] {
+            return;
+        }
+        self.journey.done[p] = true;
+        let feet = self.player.feet();
+        let accent = self.world().accent();
+        self.fx.ring(feet, feet.norm(), 1.6, 1.2, accent);
+        self.player.cheer = 1.0;
+        self.snd.play(Sfx::Chime(7), 1.0, 0.5);
+        self.save_now();
+    }
+
+    /// A replay's `assist`: autoplay's way through the task, a walk to the
+    /// character to talk once the task is ready, then a wait beside them.
+    fn assist_step(&mut self, dt: f32) -> (V3, bool) {
+        let p = self.cur;
+        let w = self.world();
+        if self.journey.done[p] {
+            return (V3::ZERO, false);
+        }
+        if w.ready() {
+            if let Some(s) = w.speaker() {
+                let to = (s - self.player.feet()).flatten(self.player.n);
+                if to.len() < TALK * 0.75 {
+                    self.talk();
+                    return (V3::ZERO, false);
+                }
+                return (to.norm(), false);
+            }
+        }
+        self.autopilot(dt)
+    }
+
+    /// Answers the star map: flies to an open planet, closes on the
+    /// current one, and only chimes low at a locked one.
+    fn fly_from_map(&mut self, p: usize) {
+        if p == self.cur {
+            self.menu = None;
+        } else if self.route_open(p) {
+            self.menu = None;
+            self.begin_flight(p);
+        } else {
+            self.snd.play(Sfx::Land, 0.6, 0.4);
+        }
     }
 
     /// Starts or continues journey `slot`.
@@ -312,6 +412,7 @@ impl App {
         }
         self.menu = None;
         self.autoplay = false;
+        self.dialog = None;
         self.slot = Some(slot);
         self.settings.slot = slot;
         self.store.save_settings(&self.settings);
@@ -328,6 +429,7 @@ impl App {
             Action::None => {}
             Action::Close => self.menu = None,
             Action::Load(slot) => self.load(slot),
+            Action::Fly(p) => self.fly_from_map(p),
             Action::Clear(slot) => {
                 // Shown empty only once it is moved aside; otherwise the
                 // journeys page says the deletion failed.
@@ -342,6 +444,7 @@ impl App {
                 if self.save_now() {
                     self.slot = None;
                     self.menu = None;
+                    self.dialog = None;
                     self.set_mode(Mode::Title);
                 }
             }
@@ -386,6 +489,7 @@ impl App {
     fn arrive_at(&mut self, idx: usize, alt: f32) {
         self.cur = idx;
         self.sun_e = 0.0;
+        self.dialog = None;
         if self.counting() {
             self.journey.visited[idx] = true;
         }
@@ -405,15 +509,16 @@ impl App {
         self.planet_t = 0.0;
     }
 
-    pub fn begin_flight(&mut self) {
-        if self.mode != Mode::Play {
+    /// The birds carry the traveller to planet `to`.
+    pub fn begin_flight(&mut self, to: usize) {
+        if self.mode != Mode::Play || to == self.cur {
             return;
         }
         self.set_mode(Mode::Fly);
         if self.counting() {
             self.journey.stats.flights += 1;
         }
-        self.fly_to = (self.cur + 1) % self.worlds.len();
+        self.fly_to = to;
         self.switched = false;
         self.player.reach_target = 1.0;
         self.snd.play(Sfx::Whoosh, 1.0, 0.5);
@@ -533,6 +638,9 @@ impl App {
                 Mode::Title if c.pressed(Button::A) => self.open_menu(Page::Journeys),
                 Mode::Play if !self.autoplay && c.pressed(Button::Start) => self.open_menu(Page::Pause),
                 Mode::Play if !self.autoplay && c.pressed(Button::Select) => self.open_menu(Page::Statistics),
+                Mode::Play if !self.autoplay && self.dialog.is_none() && c.pressed(Button::X) => {
+                    self.open_menu(Page::StarMap)
+                }
                 _ => {}
             }
             if self.menu.is_some() {
@@ -563,14 +671,28 @@ impl App {
                 if self.autoplay {
                     (wish, jump) = self.autopilot(dt);
                     if self.planet_t > AUTOPLAY_STAY {
-                        self.begin_flight();
+                        self.begin_flight((self.cur + 1) % self.worlds.len());
                     }
+                } else if self.dialog.is_some() {
+                    // A conversation holds the traveller still: A goes on,
+                    // B leaves it unfinished.
+                    let lang = self.lang;
+                    let whole = self.dialog.as_ref().is_some_and(|d| d.whole(lang));
+                    if (input && c.pressed(Button::A)) || (self.assist && whole) {
+                        self.advance_dialog();
+                    } else if input && c.pressed(Button::B) {
+                        self.dialog = None;
+                    }
+                } else if self.assist {
+                    (wish, jump) = self.assist_step(dt);
                 } else if input {
-                    if c.pressed(Button::X) {
-                        self.begin_flight();
-                    }
                     wish = self.cam_fwd * -my + self.cam_fwd.cross(n) * mx;
-                    jump = c.pressed(Button::A);
+                    // Near a character A talks instead of jumping.
+                    if c.pressed(Button::A) && self.near_speaker() {
+                        self.talk();
+                    } else {
+                        jump = c.pressed(Button::A);
+                    }
                     // Right stick: left/right orbits the camera round the
                     // hero, up/down raises or lowers it (stick up looks up).
                     if lx != 0.0 || ly != 0.0 {
@@ -587,6 +709,9 @@ impl App {
             jump = false;
         }
 
+        if let Some(d) = &mut self.dialog {
+            d.update(dt);
+        }
         let t = self.t;
         let wind = self.world().wind();
         let w = &self.worlds[self.cur];

@@ -1,0 +1,36 @@
+# A new journey: only B612 is open on the star map. Pulling up the seven
+# sprouts and then talking to the rose opens the route to the lamplighter.
+0.5 press a
+0.8 press a                  # journey 1, new
+1.2 check mode = play
+1.2 check slot = 1
+1.2 check open.lamp = 0
+1.2 check open.desert = 0
+1.4 press x
+1.7 check menu = starmap
+1.7 check row = 0
+1.9 press down
+2.1 press a                  # the lamplighter: no route yet
+2.4 check menu = starmap
+2.4 check mode = play
+2.6 press b
+2.9 check menu = none
+3.0 assist 100
+100.0 check score.b612 = 7
+100.0 check done.b612 = 1
+100.0 check open.lamp = 1
+100.0 check open.desert = 0
+103.5 check near = 1
+104.2 press a                # the rose again, then save and quit mid-sentence
+104.5 check dialog = rose
+104.7 press start
+105.0 check menu = pause
+105.2 press down
+105.4 press down
+105.6 press down
+105.8 press a
+106.2 check mode = title
+106.2 check dialog = none
+119.0 check autoplay = 1     # autoplay takes over without the old conversation
+119.0 check dialog = none
+119.5 quit
