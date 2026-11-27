@@ -762,6 +762,26 @@ impl Builder {
         self.append_vertices(other, 0, other.pos.len() / 3);
     }
 
+    /// Fewer triangles, where details smaller than `cell` would not show
+    /// (see `cluster`).
+    pub fn clustered(self, cell: f32) -> Builder {
+        let mut b = self.indexed();
+        if !b.idx.is_empty() {
+            b.idx = cluster(&b.pos, &b.idx, cell);
+        }
+        b
+    }
+
+    /// A copy with every vertex colour passed through `f`.
+    pub fn recoloured(&self, f: impl Fn(Color) -> Color) -> Builder {
+        let mut b = self.clone();
+        for c in b.col.chunks_mut(4) {
+            let o = f(Color { r: c[0], g: c[1], b: c[2], a: c[3] });
+            c.copy_from_slice(&[o.r, o.g, o.b, o.a]);
+        }
+        b
+    }
+
     fn append_vertices(&mut self, other: &Builder, first: usize, count: usize) {
         let end = first + count;
         self.pos.extend_from_slice(&other.pos[first * 3..end * 3]);

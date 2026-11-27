@@ -18,7 +18,7 @@ use crate::math::{any_perp, approach, place, smooth, v3, Frame, Rng, V3};
 use crate::mesh::{self, no_sway, Builder, Group, Kit, Tile};
 use crate::sound::{Sfx, Sounds};
 use crate::text::T;
-use raylib_sys::Color;
+use raylib_sys::{Color, Mesh};
 use std::f32::consts::{PI, TAU};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -597,6 +597,9 @@ pub struct World {
     /// but pulled sprouts grow back and can be pulled again.
     pub pulled: usize,
     pub pop: f32,
+    /// The planet in miniature, ground and coarse scenery in one mesh, for
+    /// the storybook: in colour, and as a blue ink sketch.
+    pub mini: [Mesh; 2],
 }
 
 impl World {
@@ -682,6 +685,7 @@ impl World {
             total: 0,
             pulled: 0,
             pop: 0.0,
+            mini: unsafe { std::mem::zeroed() },
         };
         let mut props = Builder::default();
         props.lo = Some(Box::default());
@@ -1023,6 +1027,18 @@ impl World {
             }
         }
         let lo = props.lo.take().map(|b| *b).unwrap_or_default();
+        let mut mini = coarse_ground.clone();
+        mini.append(&lo);
+        // The book shows a planet at most about 160 pixels across.
+        let mini = mini.clustered(rad * 0.025);
+        if std::env::var("LITTLEPRINCE_PROFILE").is_ok() {
+            eprintln!("prof: {kind:?} in miniature: {} triangles", mini.tris());
+        }
+        let sketch = mini.recoloured(|c| {
+            let l = (0.3 * c.r as f32 + 0.55 * c.g as f32 + 0.15 * c.b as f32) / 255.0;
+            mix(rgb(0x41509A), rgb(0xE8ECF8), smooth((l - 0.3) / 0.55))
+        });
+        w.mini = [mini.upload_static(), sketch.upload_static()];
         (w.tiles, w.groups) = mesh::tiles(
             [ground, props, lo, decor, grass],
             coarse_ground,

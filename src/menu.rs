@@ -12,6 +12,9 @@ pub enum Page {
     Statistics,
     /// The three planets and the birds' routes between them, on X.
     StarMap,
+    /// A planet's chapter, the row being the planet: its story, its task
+    /// and the way there.
+    Chapter,
 }
 
 /// The pause menu's rows.
@@ -95,7 +98,7 @@ impl Menu {
             Page::Pause => PAUSE.len(),
             Page::Settings => SETTINGS.len(),
             Page::Statistics => 0,
-            Page::StarMap => 3,
+            Page::StarMap | Page::Chapter => 3,
         }
     }
 
@@ -112,11 +115,13 @@ impl Menu {
     pub fn step(&mut self, k: Keys) -> Action {
         let Some((page, row)) = self.stack.last_mut() else { return Action::Close };
         let (page, rows) = (*page, Self::rows(*page));
+        // The star chart and the chapters lie left to right across the book.
+        let across = matches!(page, Page::StarMap | Page::Chapter);
         if rows > 0 {
-            if k.up {
+            if k.up || (across && k.left) {
                 *row = (*row + rows - 1) % rows;
             }
-            if k.down {
+            if k.down || (across && k.right) {
                 *row = (*row + 1) % rows;
             }
         }
@@ -127,7 +132,12 @@ impl Menu {
             return Action::Close;
         }
         if k.b {
-            return self.back();
+            let action = self.back();
+            // Back from a chapter, the chart points at that planet.
+            if let (Page::Chapter, Some((Page::StarMap, r))) = (page, self.stack.last_mut()) {
+                *r = row;
+            }
+            return action;
         }
         match page {
             Page::Journeys => {
@@ -156,8 +166,16 @@ impl Menu {
             },
             Page::Settings if k.left => Action::Change(SETTINGS[row], -1),
             Page::Settings if k.right || k.a => Action::Change(SETTINGS[row], 1),
-            Page::StarMap if k.a => Action::Fly(row),
+            Page::StarMap if k.a => {
+                self.stack.push((Page::Chapter, row));
+                Action::None
+            }
             Page::StarMap if k.x => self.back(),
+            Page::Chapter if k.a => Action::Fly(row),
+            Page::Chapter if k.x => {
+                self.stack.clear();
+                Action::Close
+            }
             Page::Statistics if k.a => self.back(),
             _ => Action::None,
         }
@@ -198,10 +216,24 @@ mod tests {
     }
 
     #[test]
+    fn chapters_open_from_the_chart() {
+        let mut m = Menu::open(Page::StarMap, 0);
+        m.step(press(|k| k.right = true));
+        assert_eq!(m.step(press(|k| k.a = true)), Action::None);
+        assert_eq!(m.top(), (Page::Chapter, 1));
+        m.step(press(|k| k.right = true));
+        assert_eq!(m.top(), (Page::Chapter, 2), "left and right turn to the next chapter");
+        assert_eq!(m.step(press(|k| k.a = true)), Action::Fly(2));
+        assert_eq!(m.step(press(|k| k.b = true)), Action::None);
+        assert_eq!(m.top(), (Page::StarMap, 2), "back on the chart at the chapter's planet");
+        m.step(press(|k| k.a = true));
+        assert_eq!(m.step(press(|k| k.x = true)), Action::Close, "X closes the book from a chapter");
+    }
+
+    #[test]
     fn rows_wrap_round() {
         let mut m = Menu::open(Page::StarMap, 1);
         m.step(press(|k| k.down = true));
-        assert_eq!(m.step(press(|k| k.a = true)), Action::Fly(2));
         assert_eq!(m.step(press(|k| k.x = true)), Action::Close, "X closes the map it opened");
         let mut m = Menu::open(Page::Pause, 0);
         m.step(press(|k| k.up = true));

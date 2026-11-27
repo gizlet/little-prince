@@ -3,11 +3,11 @@
 //! performance panel (FPS with a frame-time graph, CPU, memory, temperature).
 
 use crate::app::{App, Mode};
+use crate::book;
 use crate::dialog::Dialog;
-use crate::gl::{lighten, rgb, rgba};
+use crate::gl::{rgb, rgba};
 use crate::math::{clamp01, smooth};
 use crate::menu::{Menu, Page, PauseItem, Setting, PAUSE, SETTINGS};
-use crate::save::Slot;
 use crate::text::{s, Align, Fonts, Lang, Weight, T};
 use raylib_sys::{self as ffi, Camera2D, Color, Rectangle, RenderTexture2D, Vector2};
 use std::cell::RefCell;
@@ -18,7 +18,7 @@ const LINK: Color = rgb(0xA8DCFF);
 const GOLD: Color = rgb(0xF6C744);
 const PANEL: Color = rgb(0x1C1830);
 
-fn rrect(x: f32, y: f32, w: f32, h: f32, r: f32, c: Color) {
+pub(crate) fn rrect(x: f32, y: f32, w: f32, h: f32, r: f32, c: Color) {
     let rn = (r * 2.0 / w.min(h)).min(1.0);
     unsafe { ffi::DrawRectangleRounded(Rectangle { x, y, width: w, height: h }, rn, 8, c) };
 }
@@ -123,18 +123,24 @@ fn blit_cache() {
 }
 
 pub fn draw(app: &App) {
-    if !crate::prof::skip("hudlive") {
+    // Under an open book nothing else shows.
+    let covered = app.book_covers();
+    if !crate::prof::skip("hudlive") && !covered {
         match app.mode {
             Mode::Title => title(app),
             _ => play(app),
         }
     }
     crate::prof::mark("hud-live");
-    if !crate::prof::skip("hudcache") {
+    if !crate::prof::skip("hudcache") && !covered {
         blit_cache();
     }
     if let Some(m) = &app.menu {
-        menu(app, m);
+        if book::is_book(m.top().0) {
+            book::draw(app);
+        } else {
+            menu(app, m);
+        }
     }
     if app.menu.is_none() && app.mode == Mode::Play {
         if let Some(d) = &app.dialog {
@@ -155,56 +161,23 @@ fn title(app: &App) {
     let f = &app.fonts;
     let l = app.lang;
     let t = app.mode_t;
-    // The title drops in letter by letter and keeps floating; a small star
-    // circles it.
-    let name = s(T::Title, l);
-    let mut size = 56.0;
-    let gap = if l == Lang::Zh { 12.0 } else { 1.0 };
-    let chars: Vec<String> = name.chars().map(|c| c.to_string()).collect();
-    let mut widths: Vec<f32> = chars.iter().map(|c| f.measure(c, size, Weight::Display)).collect();
-    let mut total: f32 = widths.iter().sum::<f32>() + gap * (chars.len() as f32 - 1.0);
-    if total > 380.0 {
-        size *= 380.0 / total;
-        widths = chars.iter().map(|c| f.measure(c, size, Weight::Display)).collect();
-        total = widths.iter().sum::<f32>() + gap * (chars.len() as f32 - 1.0);
-    }
-    let y0 = 34.0 + (56.0 - size) * 0.5;
-    let mut x = 320.0 - total / 2.0;
-    for (i, (c, w)) in chars.iter().zip(&widths).enumerate() {
-        let k = clamp01((t - 0.2 - i as f32 * 0.09) / 0.7);
-        let drop = (1.0 - ease_back(k)) * -36.0;
-        let float = (app.t * 1.6 + i as f32 * 0.7).sin() * 3.0;
-        let col = lighten(CREAM, 0.15 * ((app.t * 2.0 + i as f32).sin() * 0.5 + 0.5));
-        f.shadowed(c, x, y0 + drop + float, size, rgba(col, smooth(k * 2.0)), Align::Left, Weight::Display);
-        x += w + gap;
-    }
-    let a = smooth((t - 0.6) / 0.6);
-    let orbit = app.t * 1.3;
-    let star = Vector2 { x: 320.0 + orbit.cos() * (total / 2.0 + 26.0), y: y0 + 30.0 + orbit.sin() * 26.0 };
-    unsafe {
-        ffi::DrawCircleGradient(star, 12.0, rgba(GOLD, 0.5 * a), rgba(GOLD, 0.0));
-        ffi::DrawPoly(star, 5, 4.0, orbit.to_degrees(), rgba(rgb(0xFFF4C0), a));
-    }
-    let other = if l == Lang::Zh { Lang::En } else { Lang::Zh };
-    let a = smooth((t - 0.9) / 0.6);
-    f.shadowed(s(T::Title, other), 320.0, 104.0, 16.0, rgba(SOFT, a * 0.85), Align::Center, Weight::Text);
-    f.shadowed(s(T::Subtitle, l), 320.0, 128.0, 16.0, rgba(CREAM, a), Align::Center, Weight::Text);
-
-    if t > 1.4 {
+    // The closed book floats in, and A opens it.
+    book::cover(app, smooth(t / 0.8));
+    if t > 1.0 {
         let pulse = 0.6 + 0.4 * (app.t * 3.2).sin();
         let label = s(T::PressStart, l);
         let w = f.measure(label, 16.0, Weight::Text) + 36.0;
-        rrect(320.0 - w / 2.0, 336.0, w, 30.0, 15.0, rgba(PANEL, 0.35 * pulse + 0.2));
-        f.text(label, 320.0, 341.0, 16.0, rgba(CREAM, pulse), Align::Center);
+        rrect(320.0 - w / 2.0, 346.0, w, 28.0, 14.0, rgba(PANEL, 0.35 * pulse + 0.2));
+        f.text(label, 320.0, 350.0, 16.0, rgba(CREAM, pulse), Align::Center);
     }
 
     // Where this comes from stays on the title screen.
     let a = smooth((t - 0.5) / 0.8);
-    rrect(24.0, 380.0, 592.0, 90.0, 12.0, rgba(PANEL, 0.55 * a));
-    f.shadowed(s(T::Credit, l), 320.0, 387.0, 13.0, rgba(CREAM, a), Align::Center, Weight::Text);
-    f.shadowed(s(T::CreditUrl, l), 320.0, 405.0, 13.0, rgba(LINK, a), Align::Center, Weight::Text);
-    f.shadowed(s(T::Book, l), 320.0, 426.0, 11.0, rgba(SOFT, a * 0.9), Align::Center, Weight::Text);
-    f.shadowed(s(T::TestNote, l), 320.0, 444.0, 11.0, rgba(SOFT, a * 0.75), Align::Center, Weight::Text);
+    rrect(24.0, 382.0, 592.0, 88.0, 12.0, rgba(PANEL, 0.55 * a));
+    f.shadowed(s(T::Credit, l), 320.0, 388.0, 13.0, rgba(CREAM, a), Align::Center, Weight::Text);
+    f.shadowed(s(T::CreditUrl, l), 320.0, 406.0, 13.0, rgba(LINK, a), Align::Center, Weight::Text);
+    f.shadowed(s(T::Book, l), 320.0, 427.0, 11.0, rgba(SOFT, a * 0.9), Align::Center, Weight::Text);
+    f.shadowed(s(T::TestNote, l), 320.0, 445.0, 11.0, rgba(SOFT, a * 0.75), Align::Center, Weight::Text);
     f.shadowed(
         &format!("Start · {}", s(T::Settings, l)),
         632.0,
@@ -311,8 +284,6 @@ pub fn clock(secs: f64) -> String {
     }
 }
 
-const PLANET_NAMES: [T; 3] = [T::B612, T::Lamp, T::Desert];
-
 /// The statistics of the journey being played, as label and value.
 fn statistics(app: &App) -> Vec<(String, String)> {
     let l = app.lang;
@@ -338,35 +309,8 @@ fn menu(app: &App, m: &Menu) {
     let (page, sel) = m.top();
     let key = |b: &str, t: T| format!("{b} {}", s(t, l));
     let (title, row_h, rows, hint): (T, f32, Vec<(String, String)>, String) = match page {
-        Page::Journeys => {
-            let rows = app
-                .journeys
-                .iter()
-                .enumerate()
-                .map(|(i, j)| {
-                    let head = format!("{} {}", s(T::Journey, l), i + 1);
-                    match j {
-                        Slot::Journey(j) => {
-                            let visited = j.visited.iter().filter(|v| **v).count();
-                            (
-                                format!("{head} · {}", s(PLANET_NAMES[j.planet], l)),
-                                format!(
-                                    "{} · {} {visited}/3 · {} {}",
-                                    clock(j.stats.time),
-                                    s(T::Visited, l),
-                                    s(T::SunsetsSeen, l),
-                                    j.stats.sunsets
-                                ),
-                            )
-                        }
-                        Slot::Empty => (head, s(T::NewJourney, l).into()),
-                        Slot::Unreadable => (head, s(T::Unreadable, l).into()),
-                    }
-                })
-                .collect();
-            let hint = [key("A", T::Choose), key("X", T::Delete), key("B", T::GoBack)].join("   ");
-            (T::Journeys, 50.0, rows, hint)
-        }
+        // The book draws its own pages.
+        Page::Journeys | Page::StarMap | Page::Chapter => return,
         Page::Pause => {
             let rows = PAUSE
                 .iter()
@@ -401,23 +345,6 @@ fn menu(app: &App, m: &Menu) {
                 .collect();
             (T::Settings, 32.0, rows, [format!("←→ {}", s(T::Change, l)), key("B", T::GoBack)].join("   "))
         }
-        Page::StarMap => {
-            let rows = (0..3)
-                .map(|i| {
-                    let status = if i == app.cur {
-                        T::Here
-                    } else if app.journey.done[i] {
-                        T::TaskDone
-                    } else if app.route_open(i) {
-                        T::OpenRoute
-                    } else {
-                        T::Locked
-                    };
-                    (s(PLANET_NAMES[i], l).to_string(), s(status, l).to_string())
-                })
-                .collect();
-            (T::StarMap, 32.0, rows, [key("A", T::FlyThere), key("B", T::GoBack)].join("   "))
-        }
         Page::Statistics => (T::Statistics, 26.0, statistics(app), key("B", T::GoBack)),
     };
     let w = 360.0;
@@ -435,10 +362,6 @@ fn menu(app: &App, m: &Menu) {
         }
         let col = if chosen { rgb(0xFFFFFF) } else { CREAM };
         match page {
-            Page::Journeys => {
-                f.text(a, x + 26.0, ry + 4.0, 14.0, col, Align::Left);
-                f.text(b, x + 26.0, ry + 24.0, 11.0, SOFT, Align::Left);
-            }
             Page::Pause => {
                 f.text(a, 320.0, ry + 5.0, 14.0, col, Align::Center);
             }
@@ -448,20 +371,13 @@ fn menu(app: &App, m: &Menu) {
             }
         }
     }
-    let (hint, col) = if m.confirm.is_some() {
-        (format!("X {}", s(T::ConfirmDelete, l)), rgb(0xFF8A7A))
-    } else if app.store.failed {
-        let t = if page == Page::Journeys { T::DeleteFailed } else { T::SaveFailed };
-        (s(t, l).to_string(), rgb(0xFF8A7A))
-    } else {
-        (hint, SOFT)
-    };
+    let (hint, col) = if app.store.failed { (s(T::SaveFailed, l).to_string(), rgb(0xFF8A7A)) } else { (hint, SOFT) };
     f.text(&hint, 320.0, y + h - 28.0, 11.0, col, Align::Center);
 }
 
 /// Breaks `text` into lines no wider than `width`: at spaces, or between
 /// any two Chinese characters.
-fn wrap(f: &Fonts, text: &str, size: f32, width: f32) -> Vec<String> {
+pub(crate) fn wrap(f: &Fonts, text: &str, size: f32, width: f32) -> Vec<String> {
     let mut lines = Vec::new();
     let mut cur = String::new();
     for piece in text.split_inclusive(|c: char| c == ' ' || !c.is_ascii()) {

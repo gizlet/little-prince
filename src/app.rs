@@ -3,6 +3,7 @@
 //! autopilot, and turning the prince's steps, jumps and landings into dust,
 //! rings and sound.
 
+use crate::book;
 use crate::dialog::{Dialog, Finish};
 use crate::fx::{Burst, Fx};
 use crate::gl::{self, lighten, mix, rgb, rgba, Gl, Ink, Lighting, Post, Sprites};
@@ -123,6 +124,8 @@ pub struct App {
     /// A replay's `assist`: the traveller sees to the planet's task by
     /// itself, talking to its character when the task is ready.
     pub assist: bool,
+    /// The storybook's page, opening and page turns.
+    pub book: book::State,
 }
 
 /// How near a character the traveller must be to talk to it.
@@ -208,6 +211,7 @@ impl App {
             clock: 0.0,
             dialog: None,
             assist: false,
+            book: book::State::default(),
         }
     }
 
@@ -220,6 +224,7 @@ impl App {
             "mode" => format!("{:?}", self.mode).to_lowercase(),
             "menu" => self.menu.as_ref().map_or("none".into(), |m| format!("{:?}", m.top().0).to_lowercase()),
             "row" => self.menu.as_ref().map_or(0, |m| m.top().1).to_string(),
+            "book" => (self.book_covers() as u8).to_string(),
             "planet" => PLANETS[self.cur].into(),
             "lang" => if self.lang == Lang::Zh { "zh" } else { "en" }.into(),
             "slot" => self.slot.map_or("none".into(), |s| (s + 1).to_string()),
@@ -313,6 +318,11 @@ impl App {
             _ => 0,
         };
         self.menu = Some(Menu::open(page, row));
+    }
+
+    /// Whether the open book fills the screen.
+    pub fn book_covers(&self) -> bool {
+        self.book.view(self.menu.as_ref().map(|m| m.top()), self.fx_level > 0).covers()
     }
 
     /// Whether the birds can take the traveller to planet `p`: B612, any
@@ -571,6 +581,8 @@ impl App {
 
     pub fn update(&mut self, dt: f32, c: &Controls) {
         self.clock += dt;
+        let top = self.menu.as_ref().map(|m| m.top());
+        self.book.update(dt, top, self.fx_level > 0);
         self.stats.update(dt);
         let combo = c.down(Button::Select) && c.down(Button::Start);
         if combo {
