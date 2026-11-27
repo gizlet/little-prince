@@ -10,9 +10,12 @@ import zipfile
 app = Path(sys.argv[1])
 target = sys.argv[2]
 spec = tomllib.loads(Path("gizlet.toml").read_text(encoding="utf-8"))
-package, = spec["packages"]
-if package["target"] != target:
-    sys.exit(f"Built for {target}, but gizlet.toml declares {package['target']}")
+packages = [p for p in spec["packages"] if p["target"] == target]
+if len(packages) != 1:
+    sys.exit(f"gizlet.toml declares no single package for {target}")
+package, = packages
+if not (app / package["entry"]).is_file():
+    sys.exit(f"{package['entry']} is not in {app}")
 
 manifest = {"schema": 1}
 for key in ("id", "name", "names", "version", "description", "descriptions", "runtime"):

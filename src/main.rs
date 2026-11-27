@@ -25,6 +25,9 @@
 //! - `GIZLET_SAVE_DIR`: where journeys and settings are kept (`./save`
 //!   otherwise); captures save nothing.
 
+// A release build on Windows is a windowed program, with no console of its own.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod app;
 mod book;
 mod dialog;

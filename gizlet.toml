@@ -1,5 +1,5 @@
 id = "io.gizlet.littleprince"
-version = "0.2.2"
+version = "0.3.0"
 name = "The Little Prince"
 category = "game"
 description = "Walk three tiny planets, watch their suns set, and follow a flock of migrating birds to your next stop. A short 3D exploration demo for Gizlet handhelds."
@@ -75,3 +75,8 @@ actions = { zh-CN = "统计" }
 target = "aarch64-unknown-linux-gnu"
 tier = "lite"
 entry = "bin/littleprince"
+
+[[packages]]
+target = "x86_64-pc-windows-msvc"
+tier = "full"
+entry = "bin/littleprince.exe"

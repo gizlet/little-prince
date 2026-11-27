@@ -92,15 +92,68 @@ jobs:
         run: GIZLET_RAYLIB_LIB="$PWD/gizlet-os/bazel-bin/runtime" ./scripts/package.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: gizlet-packages
+          name: gizlet-packages-linux-arm64
           path: dist/*.gzl
           if-no-files-found: error
           overwrite: true
 
-  release:
-    needs: package
+  package-windows:
+    name: Test and package (Windows x64)
+    needs: start
     if: >-
-      !cancelled() && needs.package.result == 'success' && (
+      !cancelled() && (
+        needs.start.outputs.run == 'true'
+        || (needs.start.result == 'skipped' && github.event_name != 'issue_comment'))
+    # The RUNNERS organization variable maps platforms to self-hosted runners.
+    runs-on: ${{ fromJSON(vars.RUNNERS || '{}')['windows-x64'] || 'windows-2025' }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    concurrency:
+      group: ci-windows-${{ needs.start.outputs.number || github.run_id }}
+      cancel-in-progress: ${{ needs.start.outputs.number != '' }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ needs.start.outputs.head_sha || github.sha }}
+          lfs: true
+          persist-credentials: false
+      - name: Test
+        shell: pwsh
+        run: |
+          rustup target add x86_64-pc-windows-msvc
+          cargo test --locked --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build and package
+        shell: pwsh
+        run: ./scripts/package.ps1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gizlet-packages-windows-x64
+          path: dist/*.gzl
+          if-no-files-found: error
+          overwrite: true
+
+  packages:
+    name: Collect packages
+    needs: [package, package-windows]
+    if: >-
+      !cancelled() && needs.package.result == 'success' && needs.package-windows.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      # The Store release takes one artifact with every .gzl at its root.
+      - uses: actions/upload-artifact/merge@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gizlet-packages
+          pattern: gizlet-packages-*
+          delete-merged: true
+
+  release:
+    needs: packages
+    if: >-
+      !cancelled() && needs.packages.result == 'success' && (
         (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag'))
         || (github.event_name == 'workflow_dispatch' && github.ref_type == 'tag' && inputs.pull_request_number == ''))
     permissions:
@@ -110,7 +163,7 @@ jobs:
 
   finish:
     if: always() && needs.start.outputs.run == 'true'
-    needs: [start, package]
+    needs: [start, package, package-windows, packages]
     permissions:
       checks: write
       contents: read
@@ -119,4 +172,4 @@ jobs:
     with:
       check_run_id: ${{ needs.start.outputs.check_run_id }}
       comment_id: ${{ needs.start.outputs.comment_id }}
-      result: ${{ needs.package.result }}
+      result: ${{ needs.packages.result == 'success' && 'success' || (needs.package.result == 'cancelled' && 'cancelled' || 'failure') }}
