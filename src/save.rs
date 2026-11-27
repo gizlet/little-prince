@@ -14,7 +14,9 @@
 use std::path::PathBuf;
 
 /// The version these files are written as.
-pub const VERSION: u32 = 1;
+/// Version 2 added each planet's task parts and stardust; a version 1
+/// journey's score becomes the first part.
+pub const VERSION: u32 = 2;
 /// How many journeys can be kept.
 pub const SLOTS: usize = 3;
 /// The planets' names in save files, in `world::KINDS` order.
@@ -44,6 +46,10 @@ pub struct Stats {
     pub sunsets: u32,
     pub sprouts: u32,
     pub flights: u32,
+    /// Troubles seen to: volcanoes swept, caterpillars turned butterflies.
+    pub troubles: u32,
+    /// Times a trouble knocked the prince back.
+    pub bumps: u32,
 }
 
 /// One journey.
@@ -57,6 +63,10 @@ pub struct Journey {
     /// Each planet's score: sprouts pulled on B612, sunsets watched on the
     /// lamplighter's planet, the fox's trust in the desert.
     pub scores: [usize; 3],
+    /// Each planet's task in parts (B612: sprouts, volcanoes, caterpillars).
+    pub parts: [[usize; 3]; 3],
+    /// Stardust carried.
+    pub stardust: u32,
     pub stats: Stats,
     /// Lines this version does not understand, kept as they were.
     extra: Vec<String>,
@@ -78,6 +88,7 @@ impl Journey {
             _ => return None,
         };
         let mut j = Journey { version, ..Journey::default() };
+        let mut has_parts = [false; 3];
         for line in lines {
             let (k, v) = line.split_once(' ').map_or((line, ""), |(k, v)| (k, v.trim()));
             let known = match k {
@@ -104,11 +115,19 @@ impl Journey {
                 "sunsets" => v.parse().map(|x| j.stats.sunsets = x).is_ok(),
                 "sprouts" => v.parse().map(|x| j.stats.sprouts = x).is_ok(),
                 "flights" => v.parse().map(|x| j.stats.flights = x).is_ok(),
-                _ => match k.split_once('.') {
-                    Some((planet, "score")) => match PLANETS.iter().position(|p| *p == planet) {
-                        Some(i) => v.parse().map(|x| j.scores[i] = x).is_ok(),
-                        None => false,
-                    },
+                "troubles" => v.parse().map(|x| j.stats.troubles = x).is_ok(),
+                "bumps" => v.parse().map(|x| j.stats.bumps = x).is_ok(),
+                "stardust" => v.parse().map(|x| j.stardust = x).is_ok(),
+                _ => match k.split_once('.').and_then(|(p, key)| Some((PLANETS.iter().position(|n| *n == p)?, key))) {
+                    Some((i, "score")) => v.parse().map(|x| j.scores[i] = x).is_ok(),
+                    Some((i, "parts")) => {
+                        let nums: Vec<usize> = v.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+                        for (part, n) in j.parts[i].iter_mut().zip(&nums) {
+                            *part = *n;
+                        }
+                        has_parts[i] = !nums.is_empty();
+                        has_parts[i]
+                    }
                     _ => false,
                 },
             };
@@ -117,6 +136,12 @@ impl Journey {
             }
         }
         j.visited[j.planet] = true;
+        // Before version 2 a planet's score was its only part.
+        for i in 0..3 {
+            if !has_parts[i] {
+                j.parts[i] = [j.scores[i], 0, 0];
+            }
+        }
         Some(j)
     }
 
@@ -131,9 +156,10 @@ impl Journey {
         );
         let done: Vec<&str> = PLANETS.iter().zip(self.done).filter(|(_, d)| *d).map(|(p, _)| *p).collect();
         out += &format!("done {}\n", done.join(" "));
-        for (p, score) in PLANETS.iter().zip(self.scores) {
-            out += &format!("{p}.score {score}\n");
+        for (p, (score, parts)) in PLANETS.iter().zip(self.scores.iter().zip(self.parts)) {
+            out += &format!("{p}.score {score}\n{p}.parts {} {} {}\n", parts[0], parts[1], parts[2]);
         }
+        out += &format!("stardust {}\ntroubles {}\nbumps {}\n", self.stardust, s.troubles, s.bumps);
         out += &format!(
             "time {:.1}\ndistance {:.1}\njumps {}\nsunsets {}\nsprouts {}\nflights {}\n",
             s.time, s.distance, s.jumps, s.sunsets, s.sprouts, s.flights
@@ -329,8 +355,30 @@ mod tests {
         j.visited = [true, true, false];
         j.done = [true, false, false];
         j.scores = [5, 12, 0];
-        j.stats = Stats { time: 321.5, distance: 1234.5, jumps: 40, sunsets: 13, sprouts: 9, flights: 2 };
+        j.parts = [[3, 1, 1], [12, 0, 0], [0, 0, 0]];
+        j.stardust = 17;
+        j.stats = Stats {
+            time: 321.5,
+            distance: 1234.5,
+            jumps: 40,
+            sunsets: 13,
+            sprouts: 9,
+            flights: 2,
+            troubles: 4,
+            bumps: 2,
+        };
         j
+    }
+
+    #[test]
+    fn a_version_1_score_becomes_the_first_part() {
+        let old = format!("{SLOT_HEADER} 1\nplanet lamp\ndone b612\nb612.score 7\nlamp.score 2\n");
+        let j = Journey::parse(&old).unwrap();
+        assert_eq!(j.parts, [[7, 0, 0], [2, 0, 0], [0, 0, 0]]);
+        assert_eq!((j.stardust, j.done[0]), (0, true));
+        let again = Journey::parse(&j.render()).unwrap();
+        assert_eq!(again.parts, j.parts);
+        assert!(j.render().starts_with(&format!("{SLOT_HEADER} {VERSION}\n")));
     }
 
     #[test]

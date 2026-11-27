@@ -126,6 +126,8 @@ pub struct App {
     pub assist: bool,
     /// The storybook's page, opening and page turns.
     pub book: book::State,
+    /// Seconds left of being knocked off balance by a trouble.
+    stun: f32,
 }
 
 /// How near a character the traveller must be to talk to it.
@@ -212,6 +214,7 @@ impl App {
             dialog: None,
             assist: false,
             book: book::State::default(),
+            stun: 0.0,
         }
     }
 
@@ -224,6 +227,11 @@ impl App {
             "mode" => format!("{:?}", self.mode).to_lowercase(),
             "menu" => self.menu.as_ref().map_or("none".into(), |m| format!("{:?}", m.top().0).to_lowercase()),
             "row" => self.menu.as_ref().map_or(0, |m| m.top().1).to_string(),
+            "stardust" => self.journey.stardust.to_string(),
+            "crawling" => self.world().crawling().to_string(),
+            "sprouts-now" => self.world().sprout_count().to_string(),
+            "troubles" => self.journey.stats.troubles.to_string(),
+            "bumps" => self.journey.stats.bumps.to_string(),
             "book" => (self.book_covers() as u8).to_string(),
             "planet" => PLANETS[self.cur].into(),
             "lang" => if self.lang == Lang::Zh { "zh" } else { "en" }.into(),
@@ -249,6 +257,12 @@ impl App {
             _ => {
                 if let Some(p) = name.strip_prefix("score.").and_then(planet) {
                     return self.worlds[p].score.to_string();
+                }
+                // `part.PLANET.N`: part N of the planet's task, from 0.
+                if let Some((p, i)) = name.strip_prefix("part.").and_then(|r| r.split_once('.')) {
+                    if let (Some(p), Ok(i)) = (planet(p), i.parse::<usize>()) {
+                        return self.worlds[p].parts.get(i).map_or("none".into(), |v| v.to_string());
+                    }
                 }
                 if let Some(p) = name.strip_prefix("done.").and_then(planet) {
                     return (self.journey.done[p] as u8).to_string();
@@ -292,8 +306,9 @@ impl App {
         let Some(slot) = self.slot else { return true };
         self.journey.planet = self.cur;
         self.journey.visited[self.cur] = true;
-        for (score, w) in self.journey.scores.iter_mut().zip(&self.worlds) {
-            *score = w.score;
+        for (i, w) in self.worlds.iter().enumerate() {
+            self.journey.scores[i] = w.score;
+            self.journey.parts[i] = w.parts;
         }
         let ok = self.store.save_journey(slot, &self.journey);
         if ok {
@@ -376,7 +391,9 @@ impl App {
         let p = self.cur;
         let w = self.world();
         if self.journey.done[p] {
-            return (V3::ZERO, false);
+            // Back beside the character after a trouble knocked him away.
+            let to = w.speaker().map_or(V3::ZERO, |s| (s - self.player.feet()).flatten(self.player.n));
+            return (if to.len() > TALK * 0.6 { to.norm() } else { V3::ZERO }, false);
         }
         if w.ready() {
             if let Some(s) = w.speaker() {
@@ -417,8 +434,8 @@ impl App {
                 return;
             }
         };
-        for (w, score) in self.worlds.iter_mut().zip(j.scores) {
-            w.restore(score);
+        for (w, parts) in self.worlds.iter_mut().zip(j.parts) {
+            w.restore(parts);
         }
         self.menu = None;
         self.autoplay = false;
@@ -559,9 +576,9 @@ impl App {
         let n = self.player.n;
         let p = self.player.feet();
         self.auto_dir = self.auto_dir.flatten(n).norm().rotate(n, (self.t * 0.35).sin() * dt);
-        let (dir, arrive, still) = match self.world().autoplay_target(p) {
-            Some((tp, a, still)) => ((tp - p).flatten(n), a, still),
-            None => (self.auto_dir, 0.0, false),
+        let (dir, arrive, still, hop) = match self.world().autoplay_target(p) {
+            Some(g) => ((g.at - p).flatten(n), g.arrive, g.still, g.hop),
+            None => (self.auto_dir, 0.0, false, false),
         };
         let d = dir.len();
         let wish = if still && d < arrive {
@@ -569,10 +586,11 @@ impl App {
         } else if d < 0.05 {
             self.auto_dir
         } else {
-            dir.norm() * if still && d < arrive + 0.4 { 0.5 } else { 1.0 }
+            // Slow near a spot to stand on, or a caterpillar to land on.
+            dir.norm() * if (still && d < arrive + 0.4) || (hop && d < 0.7) { 0.45 } else { 1.0 }
         };
         self.auto_jump -= dt;
-        let jump = !still && self.auto_jump < 0.0;
+        let jump = if hop { d < 0.32 } else { !still && self.auto_jump < 0.0 };
         if self.auto_jump < 0.0 {
             self.auto_jump = self.rng.range(2.5, 5.0);
         }
@@ -721,6 +739,11 @@ impl App {
             jump = false;
         }
 
+        if self.stun > 0.0 {
+            self.stun -= dt;
+            wish = V3::ZERO;
+            jump = false;
+        }
         if let Some(d) = &mut self.dialog {
             d.update(dt);
         }
@@ -745,6 +768,7 @@ impl App {
                 self.cam_fwd = self.cam_fwd.rotate(n, angle * (1.0 - (-rate * dt).exp())).norm();
             }
         }
+        let landed = self.player.events.iter().any(|e| matches!(e, Ev::Land(..)));
         self.player_effects();
         let motion = Motion {
             speed: sp,
@@ -755,11 +779,18 @@ impl App {
         if let Some(h) = &mut self.hero {
             h.update(dt, &motion);
         }
-        let ps = PState { feet: self.player.feet(), face: self.player.face, speed: sp };
+        let ps = PState {
+            feet: self.player.feet(),
+            face: self.player.face,
+            speed: sp,
+            grounded: self.player.grounded,
+            landed,
+        };
         let scored = self.worlds[self.cur].update(dt, t, &ps, &mut self.fx, &mut self.snd);
         if scored {
             self.player.cheer = 1.0;
         }
+        self.troubles();
         // Sunsets wherever the prince stands, on any planet.
         let e = self.player.n.dot(self.world().sun(t));
         let sunset = self.mode == Mode::Play && self.sun_e > 0.0 && e <= 0.0;
@@ -775,6 +806,30 @@ impl App {
         }
         self.fx.update(dt);
         self.update_camera(dt);
+    }
+
+    /// What the planet's troubles did this frame: stardust gathered,
+    /// troubles seen to, and a knock that spills stardust.
+    fn troubles(&mut self) {
+        let counting = self.counting();
+        let w = &self.worlds[self.cur];
+        let (gathered, handled, bump) = (w.gathered, w.handled, w.bump);
+        if counting {
+            self.journey.stardust += gathered;
+            self.journey.stats.troubles += handled;
+        }
+        let Some(from) = bump else { return };
+        self.player.knock(from);
+        self.stun = 0.45;
+        self.fx.shake = self.fx.shake.max(0.35);
+        self.snd.play(Sfx::Land, 0.7, 0.6);
+        let spill = if counting { self.journey.stardust.min(3) } else { 2 };
+        if counting {
+            self.journey.stardust -= spill;
+            self.journey.stats.bumps += 1;
+        }
+        let feet = self.player.feet();
+        self.worlds[self.cur].spill(feet, spill as usize);
     }
 
     /// How high the birds carry the prince: high enough to see the planet

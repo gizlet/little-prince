@@ -134,9 +134,13 @@ pub enum T {
     StayHere,
     Unvisited,
     TurnPage,
+    Volcanoes,
+    Caterpillars,
+    Stardust,
+    Troubles,
 }
 
-const ALL: [T; 108] = [
+const ALL: [T; 112] = [
     T::Title,
     T::Subtitle,
     T::PressStart,
@@ -245,6 +249,10 @@ const ALL: [T; 108] = [
     T::StayHere,
     T::Unvisited,
     T::TurnPage,
+    T::Volcanoes,
+    T::Caterpillars,
+    T::Stardust,
+    T::Troubles,
 ];
 
 pub fn s(t: T, l: Lang) -> &'static str {
@@ -258,7 +266,7 @@ pub fn s(t: T, l: Lang) -> &'static str {
         T::TestNote => ("Gizlet OS 上用 Rust + raylib 从零编写的 3D 游戏，其余模型与特效均由代码生成", "A 3D game for Gizlet OS written from scratch in Rust + raylib; every other model and effect is made in code"),
         T::CreditShort => ("角色：KayKit · Kay Lousberg", "Hero: KayKit by Kay Lousberg"),
         T::B612 => ("B612 · 小王子的星球", "B612 · The Prince's Planet"),
-        T::B612Hint => ("拔掉猴面包树的幼苗，再去看看玫瑰", "Pull up the baobab sprouts, then visit the rose"),
+        T::B612Hint => ("拔掉蔓延的幼苗，扫扫火山，跳到毛毛虫身上让它变成蝴蝶，再去看看玫瑰", "Pull up the spreading sprouts, sweep the volcanoes, jump on the caterpillars to make butterflies of them, then visit the rose"),
         T::Lamp => ("点灯人的星球", "The Lamplighter's Planet"),
         T::LampHint => ("陪点灯人看三次日落，再和他说说话", "Watch three sunsets with the lamplighter, then talk to him"),
         T::Desert => ("地球 · 沙漠", "Earth · The Desert"),
@@ -316,7 +324,7 @@ pub fn s(t: T, l: Lang) -> &'static str {
         T::Keeper => ("点灯人", "The lamplighter"),
         T::Fox => ("狐狸", "The fox"),
         T::RoseIntro1 => ("你回来了。猴面包树苗又冒出来了，再长下去会把星球撑裂的。", "You're back. The baobab sprouts are coming up again, and they could split the planet apart."),
-        T::RoseIntro2 => ("趁它们还小，把七棵都拔掉吧。我就在这里等你。", "Pull up all seven while they're small. I'll be right here."),
+        T::RoseIntro2 => ("火山也该扫了，不然会往外喷火星。还有毛毛虫，总往我这儿爬。", "The volcanoes need sweeping too, or they spit cinders. And the caterpillars keep crawling over to me."),
         T::RoseDone1 => ("星球干净了。谢谢你，我一直知道你会照顾我。", "The planet is clear. Thank you. I always knew you would look after me."),
         T::RoseDone2 => ("去看看别的星星吧。候鸟会带你去点灯人那里。", "Go and see the other stars. The birds will take you to the lamplighter."),
         T::RoseIdle => ("别担心我，我有四根刺呢。", "Don't worry about me. I have my four thorns."),
@@ -357,6 +365,10 @@ pub fn s(t: T, l: Lang) -> &'static str {
         T::StayHere => ("留在这里", "Stay here"),
         T::Unvisited => ("还没去过", "Not visited yet"),
         T::TurnPage => ("翻页", "Turn the page"),
+        T::Volcanoes => ("火山", "Volcanoes"),
+        T::Caterpillars => ("毛毛虫", "Caterpillars"),
+        T::Stardust => ("星尘", "Stardust"),
+        T::Troubles => ("处理的麻烦", "Troubles seen to"),
     };
     match l {
         Lang::Zh => zh,
@@ -521,6 +533,36 @@ impl Fonts {
         let width = Self::width(font, &text, size);
         self.draw_text(font, &text, Self::align_x(x, width, align), y, size, color);
         width
+    }
+
+    /// The rows the glyphs of `s` cover, from the `y` it is drawn at to the
+    /// top and bottom of their ink.
+    pub fn ink(&self, s: &str, size: f32, w: Weight) -> (f32, f32) {
+        let font = self.pick(w, size);
+        let k = size / font.baseSize as f32;
+        let (mut top, mut bottom) = (f32::MAX, f32::MIN);
+        for c in s.chars().filter(|c| !c.is_whitespace()) {
+            let (g, r) = unsafe {
+                let i = ffi::GetGlyphIndex(font, c as i32) as usize;
+                (*font.glyphs.add(i), *font.recs.add(i))
+            };
+            if r.height > 0.0 {
+                top = top.min(g.offsetY as f32 * k);
+                bottom = bottom.max((g.offsetY as f32 + r.height) * k);
+            }
+        }
+        if top > bottom {
+            (0.0, size)
+        } else {
+            (top, bottom)
+        }
+    }
+
+    /// Text whose ink is centred on `cy`, for labels on buttons and bars.
+    #[allow(clippy::too_many_arguments)]
+    pub fn middle(&self, s: &str, x: f32, cy: f32, size: f32, color: Color, align: Align, w: Weight) -> f32 {
+        let (top, bottom) = self.ink(s, size, w);
+        self.draw(s, x, cy - (top + bottom) / 2.0, size, color, align, w)
     }
 
     pub fn text(&self, s: &str, x: f32, y: f32, size: f32, color: Color, align: Align) -> f32 {

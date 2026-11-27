@@ -45,6 +45,7 @@ mod script;
 mod sound;
 mod stats;
 mod text;
+mod trouble;
 mod world;
 
 use app::{App, Mode};
@@ -269,7 +270,16 @@ fn setup_capture(app: &mut App, c: &input::Controls) {
             j.planet = 1;
             j.visited = [true, true, false];
             j.scores = [7, 12, 0];
-            j.stats = save::Stats { time: 1834.0, distance: 2210.0, jumps: 96, sunsets: 31, sprouts: 23, flights: 4 };
+            j.stats = save::Stats {
+                time: 1834.0,
+                distance: 2210.0,
+                jumps: 96,
+                sunsets: 31,
+                sprouts: 23,
+                flights: 4,
+                troubles: 9,
+                bumps: 3,
+            };
             app.journeys[0] = save::Slot::Journey(j.clone());
             j.planet = 2;
             j.visited = [true, true, true];
@@ -283,8 +293,16 @@ fn setup_capture(app: &mut App, c: &input::Controls) {
             app.start_play(0);
             step(app, at);
             app.autoplay = false;
-            app.journey.stats =
-                save::Stats { time: 1834.0, distance: 2210.0, jumps: 96, sunsets: 31, sprouts: 23, flights: 4 };
+            app.journey.stats = save::Stats {
+                time: 1834.0,
+                distance: 2210.0,
+                jumps: 96,
+                sunsets: 31,
+                sprouts: 23,
+                flights: 4,
+                troubles: 9,
+                bumps: 3,
+            };
             app.journey.visited = [true, true, false];
             let page = match scene.as_str() {
                 "settings" => menu::Page::Settings,
@@ -316,6 +334,16 @@ fn setup_capture(app: &mut App, c: &input::Controls) {
                 d.shown = f32::MAX;
                 app.dialog = Some(d);
             }
+        }
+        "troubles" => {
+            // B612 as a volcano throws its cinders, seen by a journey
+            // carrying some stardust.
+            app.autoplay = true;
+            app.start_play(0);
+            step(app, at);
+            app.autoplay = false;
+            app.slot = Some(0);
+            app.journey.stardust = 12;
         }
         "b612" | "lamp" | "desert" | "fly" => {
             let idx = match scene.as_str() {

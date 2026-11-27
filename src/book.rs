@@ -347,7 +347,7 @@ fn para(f: &Fonts, text: &str, x: f32, y: f32, size: f32, width: f32, col: Color
 fn pill(f: &Fonts, text: &str, x: f32, y: f32, a: f32) {
     let w = f.measure(text, 13.0, Weight::Text) + 32.0;
     rrect(x - w / 2.0, y, w, 26.0, 13.0, rgba(GOLD, 0.92 * a));
-    f.text(text, x, y + 5.0, 13.0, rgba(rgb(0xFFF8E8), a), Align::Center);
+    f.middle(text, x, y + 13.0, 13.0, rgba(rgb(0xFFF8E8), a), Align::Center, Weight::Text);
 }
 
 /// The help line at the foot of the spread.
@@ -616,15 +616,13 @@ fn chapter(app: &App, p: usize, a: f32, tiles: &[RenderTexture2D]) {
     f.text(s(T::Task, l), rx, y, 11.0, rgba(FADED, a), Align::Center);
     y += 18.0;
     y += para(f, s(TASKS[p], l), rx, y, 13.0, 236.0, rgba(INK, a)) + 4.0;
-    let w = &app.worlds[p];
     if app.journey.done[p] {
         star(rx - f.measure(s(T::TaskDone, l), 13.0, Weight::Text) / 2.0 - 12.0, y + 8.0, 7.0, rgba(GOLD, a));
         f.text(s(T::TaskDone, l), rx, y, 13.0, rgba(GOLD, a), Align::Center);
     } else if app.journey.visited[p] {
-        let label = s(w.name().2, l);
-        let line =
-            if w.total > 0 { format!("{label} {}/{}", w.score, w.total) } else { format!("{label} {}", w.score) };
-        f.text(&line, rx, y, 13.0, rgba(INK, 0.8 * a), Align::Center);
+        let line = crate::hud::progress(&app.worlds[p], l);
+        let size = fit(f, &line, 13.0, 250.0, Weight::Text);
+        f.text(&line, rx, y, size, rgba(INK, 0.8 * a), Align::Center);
     }
     if p == app.cur {
         pill(f, &format!("A  {}", s(T::StayHere, l)), rx, 364.0, a);

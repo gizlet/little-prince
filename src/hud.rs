@@ -9,6 +9,7 @@ use crate::gl::{rgb, rgba};
 use crate::math::{clamp01, smooth};
 use crate::menu::{Menu, Page, PauseItem, Setting, PAUSE, SETTINGS};
 use crate::text::{s, Align, Fonts, Lang, Weight, T};
+use crate::world::World;
 use raylib_sys::{self as ffi, Camera2D, Color, Rectangle, RenderTexture2D, Vector2};
 use std::cell::RefCell;
 
@@ -168,7 +169,7 @@ fn title(app: &App) {
         let label = s(T::PressStart, l);
         let w = f.measure(label, 16.0, Weight::Text) + 36.0;
         rrect(320.0 - w / 2.0, 346.0, w, 28.0, 14.0, rgba(PANEL, 0.35 * pulse + 0.2));
-        f.text(label, 320.0, 350.0, 16.0, rgba(CREAM, pulse), Align::Center);
+        f.middle(label, 320.0, 360.0, 16.0, rgba(CREAM, pulse), Align::Center, Weight::Text);
     }
 
     // Where this comes from stays on the title screen.
@@ -193,7 +194,7 @@ fn play(app: &App) {
     let f = &app.fonts;
     let l = app.lang;
     let w = app.world();
-    let (name, hint, label) = w.name();
+    let (name, hint, _) = w.name();
 
     let bt = app.planet_t;
     if app.mode == Mode::Play && bt < 5.5 {
@@ -207,13 +208,10 @@ fn play(app: &App) {
     }
 
     // The score, popping when it grows.
-    let text = if w.total > 0 {
-        format!("{} {}/{}", s(label, l), w.score, w.total)
-    } else {
-        format!("{} {}", s(label, l), w.score)
-    };
+    let text = progress(w, l);
     let pop = w.pop * w.pop;
-    let size = 16.0 * (1.0 + 0.3 * pop);
+    let base = if w.needs.iter().filter(|n| **n > 0).count() > 1 { 13.0 } else { 16.0 };
+    let size = base * (1.0 + 0.3 * pop);
     let tw = f.measure(&text, size, Weight::Text);
     let pw = tw + 34.0;
     let h = 26.0 * (1.0 + 0.2 * pop);
@@ -221,17 +219,28 @@ fn play(app: &App) {
     unsafe {
         ffi::DrawPoly(Vector2 { x: 632.0 - pw + 14.0, y: 10.0 + h / 2.0 }, 5, 6.0 + pop * 3.0, app.t * 40.0, GOLD);
     }
-    f.text(&text, 632.0 - 10.0, 10.0 + (h - size * 1.2) / 2.0, size, CREAM, Align::Right);
+    f.middle(&text, 632.0 - 10.0, 10.0 + h / 2.0, size, CREAM, Align::Right, Weight::Text);
 
     if app.mode == Mode::Play && !app.autoplay && app.dialog.is_none() && app.menu.is_none() && app.near_speaker() {
         let label = format!("A  {}", s(T::Talk, l));
         let w = f.measure(&label, 14.0, Weight::Text) + 28.0;
         rrect(320.0 - w / 2.0, 392.0, w, 26.0, 13.0, rgba(PANEL, 0.6));
-        f.text(&label, 320.0, 396.0, 14.0, CREAM, Align::Center);
+        f.middle(&label, 320.0, 405.0, 14.0, CREAM, Align::Center, Weight::Text);
     }
     if app.autoplay {
         let a = 0.55 + 0.45 * (app.t * 2.5).sin();
         f.shadowed(s(T::Autoplay, l), 632.0, 44.0, 11.0, rgba(CREAM, a), Align::Right, Weight::Text);
+    } else if app.slot.is_some() && app.mode != Mode::Title {
+        // The stardust carried, under the task.
+        let text = format!("{} {}", s(T::Stardust, l), app.journey.stardust);
+        let pw = f.measure(&text, 13.0, Weight::Text) + 32.0;
+        rrect(632.0 - pw, 42.0, pw, 22.0, 11.0, rgba(PANEL, 0.55));
+        let at = Vector2 { x: 632.0 - pw + 13.0, y: 53.0 };
+        unsafe {
+            ffi::DrawCircleGradient(at, 8.0, rgba(rgb(0xFFD36E), 0.6), rgba(rgb(0xFFD36E), 0.0));
+            ffi::DrawPoly(at, 4, 4.0, app.t * 50.0, rgb(0xFFF4C8));
+        }
+        f.middle(&text, 622.0, 53.0, 13.0, CREAM, Align::Right, Weight::Text);
     }
     if app.mode == Mode::Fly {
         let a = smooth(app.mode_t / 0.5) * (1.0 - smooth((app.mode_t - 3.2) / 0.6));
@@ -265,12 +274,25 @@ fn bar(app: &App) {
     rrect(x - 10.0, y - 4.0, total + 20.0, 22.0, 11.0, rgba(PANEL, 0.45));
     for ((b, a), (bw, aw)) in items.iter().zip(&widths) {
         rrect(x, y - 1.0, *bw, 16.0, 8.0, rgba(CREAM, 0.88));
-        f.text(b, x + bw / 2.0, y, size, PANEL, Align::Center);
+        f.middle(b, x + bw / 2.0, y + 7.0, size, PANEL, Align::Center, Weight::Text);
         x += bw + 4.0;
-        f.text(a, x, y, size, CREAM, Align::Left);
+        f.middle(a, x, y + 7.0, size, CREAM, Align::Left, Weight::Text);
         x += aw + 12.0;
     }
     f.shadowed(s(T::CreditShort, l), 632.0, 434.0, 11.0, rgba(SOFT, 0.75), Align::Right, Weight::Text);
+}
+
+/// The planet's task as its parts and how far each has come.
+pub fn progress(w: &World, l: Lang) -> String {
+    let parts: Vec<String> = (0..3)
+        .filter(|&i| w.needs[i] > 0)
+        .map(|i| format!("{} {}/{}", s(w.labels[i], l), w.parts[i], w.needs[i]))
+        .collect();
+    if parts.is_empty() {
+        format!("{} {}", s(w.name().2, l), w.score)
+    } else {
+        parts.join(" · ")
+    }
 }
 
 /// `h:mm:ss`, or `m:ss` under an hour.
@@ -298,6 +320,8 @@ fn statistics(app: &App) -> Vec<(String, String)> {
         (s(T::Flights, l).into(), st.flights.to_string()),
         (s(T::Visited, l).into(), format!("{visited}/3")),
         (s(T::TasksDone, l).into(), format!("{}/3", app.journey.done.iter().filter(|d| **d).count())),
+        (s(T::Stardust, l).into(), app.journey.stardust.to_string()),
+        (s(T::Troubles, l).into(), st.troubles.to_string()),
     ]
 }
 
@@ -356,6 +380,7 @@ fn menu(app: &App, m: &Menu) {
     let selectable = page != Page::Statistics;
     for (i, (a, b)) in rows.iter().enumerate() {
         let ry = y + 52.0 + i as f32 * row_h;
+        let cy = ry - 2.0 + (row_h - 4.0) / 2.0;
         let chosen = selectable && i == sel;
         if chosen {
             rrect(x + 12.0, ry - 2.0, w - 24.0, row_h - 4.0, 8.0, rgba(GOLD, 0.22));
@@ -363,11 +388,11 @@ fn menu(app: &App, m: &Menu) {
         let col = if chosen { rgb(0xFFFFFF) } else { CREAM };
         match page {
             Page::Pause => {
-                f.text(a, 320.0, ry + 5.0, 14.0, col, Align::Center);
+                f.middle(a, 320.0, cy, 14.0, col, Align::Center, Weight::Text);
             }
             _ => {
-                f.text(a, x + 26.0, ry + 5.0, 13.0, col, Align::Left);
-                f.text(b, x + w - 26.0, ry + 5.0, 13.0, if chosen { GOLD } else { SOFT }, Align::Right);
+                f.middle(a, x + 26.0, cy, 13.0, col, Align::Left, Weight::Text);
+                f.middle(b, x + w - 26.0, cy, 13.0, if chosen { GOLD } else { SOFT }, Align::Right, Weight::Text);
             }
         }
     }
