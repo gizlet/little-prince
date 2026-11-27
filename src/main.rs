@@ -14,9 +14,15 @@
 //! - `LITTLEPRINCE_AUTOPLAY=1`: start autoplay at once.
 //! - `LITTLEPRINCE_MUTE=1`: no sound.
 //! - `LITTLEPRINCE_CAPTURE=FILE.png` with `LITTLEPRINCE_SCENE` (`title`, `icon`,
-//!   `b612`, `lamp`, `desert`, `fly`) and `LITTLEPRINCE_AT` (seconds of autoplay first):
+//!   `b612`, `lamp`, `desert`, `fly`, `journeys`, `pause`, `settings`,
+//!   `statistics`) and `LITTLEPRINCE_AT` (seconds of autoplay first):
 //!   render one frame to a PNG and exit.
 //! - `LITTLEPRINCE_SECONDS=N`: quit after N seconds (for scripted runs).
+//! - `LITTLEPRINCE_SCRIPT=FILE`: replay the button presses in FILE and check
+//!   the game's state as it goes; exits with status 1 if a check fails (see
+//!   `script`).
+//! - `GIZLET_SAVE_DIR`: where journeys and settings are kept (`./save`
+//!   otherwise); captures save nothing.
 
 mod app;
 #[cfg(all(target_os = "linux", feature = "gizlet-os"))]
@@ -27,9 +33,12 @@ mod hero;
 mod hud;
 mod input;
 mod math;
+mod menu;
 mod mesh;
 mod player;
 mod prof;
+mod save;
+mod script;
 mod sound;
 mod stats;
 mod text;
@@ -112,7 +121,7 @@ fn main() {
         if std::env::var("GIZLET_LANG").is_ok_and(|v| v.starts_with("en")) { text::Lang::En } else { text::Lang::Zh };
     let zoom = view().1.max(1.0);
     let mut controls = input::Controls::new();
-    let mut app = App::new(lang, zoom, audio);
+    let mut app = App::new(lang, zoom, audio, save::Store::from_env(capture.is_none()));
     if env_on("LITTLEPRINCE_AUTOPLAY") {
         app.autoplay = true;
         app.start_play(0);
@@ -126,9 +135,22 @@ fn main() {
     }
     let start = unsafe { ffi::GetTime() };
     let quit_after: Option<f64> = std::env::var("LITTLEPRINCE_SECONDS").ok().and_then(|v| v.parse().ok());
+    let mut replay = std::env::var("LITTLEPRINCE_SCRIPT").ok().map(|path| {
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("littleprince: cannot read {path}: {e}"));
+        script::Player::new(script::parse(&text).unwrap_or_else(|e| panic!("littleprince: {path}: {e}")))
+    });
+    let mut steps = 0u32;
     while !unsafe { ffi::WindowShouldClose() } && !app.quit {
         let frame = prof::start_frame();
-        let dt = if capture.is_some() { 1.0 / 60.0 } else { unsafe { ffi::GetFrameTime() }.min(0.1) };
+        let fixed = capture.is_some() || replay.is_some();
+        let dt = if fixed { 1.0 / 60.0 } else { unsafe { ffi::GetFrameTime() }.min(0.1) };
+        if let Some(r) = &mut replay {
+            controls.scripted = r.step(steps as f32 / 60.0, &|name| app.probe(name));
+            steps += 1;
+            if r.done {
+                break;
+            }
+        }
         let now = unsafe { ffi::GetTime() } - start;
         if quit_after.is_some_and(|s| now >= s) {
             break;
@@ -193,7 +215,19 @@ fn main() {
             });
         }
     }
+    app.save_now();
     unsafe { ffi::CloseWindow() };
+    if let Some(r) = replay {
+        eprintln!("script: {} checks, {} failed", r.checks, r.failures);
+        // Stopping early, by closing the window or LITTLEPRINCE_SECONDS,
+        // leaves checks unplayed: that is a failure too.
+        if !r.done {
+            eprintln!("script: FAIL the game stopped before the script ended");
+        }
+        if r.failures > 0 || !r.done {
+            std::process::exit(1);
+        }
+    }
 }
 
 /// Plays the scene a capture asks for, at a fixed 60 steps a second.
@@ -220,6 +254,36 @@ fn setup_capture(app: &mut App, c: &input::Controls) {
             }
             app.start_play(0);
             step(app, at);
+        }
+        "journeys" => {
+            // Two journeys under way and an empty slot.
+            let mut j = save::Journey::start();
+            j.planet = 1;
+            j.visited = [true, true, false];
+            j.scores = [7, 12, 0];
+            j.stats = save::Stats { time: 1834.0, distance: 2210.0, jumps: 96, sunsets: 31, sprouts: 23, flights: 4 };
+            app.journeys[0] = save::Slot::Journey(j.clone());
+            j.planet = 2;
+            j.visited = [true, true, true];
+            j.stats.time = 4210.0;
+            app.journeys[2] = save::Slot::Journey(j);
+            step(app, at.min(4.0));
+            app.menu = Some(menu::Menu::open(menu::Page::Journeys, 0));
+        }
+        "pause" | "settings" | "statistics" => {
+            app.autoplay = true;
+            app.start_play(0);
+            step(app, at);
+            app.autoplay = false;
+            app.journey.stats =
+                save::Stats { time: 1834.0, distance: 2210.0, jumps: 96, sunsets: 31, sprouts: 23, flights: 4 };
+            app.journey.visited = [true, true, false];
+            let page = match scene.as_str() {
+                "settings" => menu::Page::Settings,
+                "statistics" => menu::Page::Statistics,
+                _ => menu::Page::Pause,
+            };
+            app.menu = Some(menu::Menu::open(page, 0));
         }
         "b612" | "lamp" | "desert" | "fly" => {
             let idx = match scene.as_str() {

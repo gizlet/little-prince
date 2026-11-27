@@ -1,0 +1,22 @@
+# Reopen the game: the settings and journey 1 are as they were left.
+0.5 check lang = en
+0.5 check volume = 7
+1.0 press a
+1.3 check menu = journeys
+1.3 check saved.1 = 1
+1.5 press a
+2.0 check mode = play
+2.0 check slot = 1
+2.0 check jumps >= 2
+2.2 press x                 # the birds carry him to the lamplighter
+3.0 check mode = fly
+8.0 check mode = play
+8.0 check planet = lamp
+8.0 check flights = 1
+8.0 check saved.1.planet = lamp
+8.0 check saved.1.visited = 2
+8.5 press select
+8.8 check menu = statistics
+9.0 press b
+9.2 check menu = none
+9.4 quit

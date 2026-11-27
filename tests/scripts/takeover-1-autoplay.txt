@@ -1,0 +1,14 @@
+# Left alone on the title, the game plays by itself; taking over asks for a
+# journey first, so that what follows is saved.
+12.5 check autoplay = 1
+12.5 check mode = play
+12.5 check slot = none
+13.0 press right
+13.3 check autoplay = 0
+13.3 check mode = title
+13.3 check menu = journeys
+13.6 press a
+14.0 check mode = play
+14.0 check slot = 1
+14.0 check saved.1 = 1
+14.2 quit

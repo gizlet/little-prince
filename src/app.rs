@@ -8,8 +8,10 @@ use crate::gl::{self, lighten, mix, rgb, rgba, Gl, Ink, Lighting, Post, Sprites}
 use crate::hero::{Hero, Motion};
 use crate::input::{Button, Controls};
 use crate::math::{any_perp, approach3, clamp01, place, smooth, v3, Rng, V3};
+use crate::menu::{Action, Keys, Menu, Page, Setting};
 use crate::mesh::Kit;
 use crate::player::{Ev, Player, SPEED};
+use crate::save::{Journey, Settings, Slot, Store, SLOTS};
 use crate::sound::{Sfx, Sounds};
 use crate::stats::Stats;
 use crate::text::{Fonts, Lang};
@@ -99,10 +101,51 @@ pub struct App {
     auto_dir: V3,
     auto_jump: f32,
     rng: Rng,
+    pub store: Store,
+    pub settings: Settings,
+    /// The journey being played; autoplay plays none and saves nothing.
+    pub slot: Option<usize>,
+    pub journey: Journey,
+    /// The journeys on disk, for the journeys page.
+    pub journeys: [Slot; SLOTS],
+    /// The menu on screen; play stops while one is open.
+    pub menu: Option<Menu>,
+    /// Seconds since the journey was last saved.
+    save_t: f32,
+    /// The sun's height over the prince last frame, for counting sunsets.
+    sun_e: f32,
+    /// Seconds since the game started, running on while play is paused:
+    /// for refreshing the HUD.
+    pub clock: f32,
 }
 
+/// Seconds between saves while playing, besides those on arriving, scoring,
+/// opening the menu and quitting.
+const AUTOSAVE: f32 = 60.0;
+
 impl App {
-    pub fn new(lang: Lang, zoom: f32, audio: bool) -> App {
+    /// `lang` is the platform's language; a language chosen in the settings
+    /// wins over it.
+    pub fn new(lang: Lang, zoom: f32, audio: bool, store: Store) -> App {
+        let settings = store.settings();
+        let lang = match settings.lang.as_deref() {
+            Some("en") => Lang::En,
+            Some("zh") => Lang::Zh,
+            _ => lang,
+        };
+        let fx_level = std::env::var("LITTLEPRINCE_FX")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .or(settings.fx)
+            .unwrap_or(if cfg!(feature = "gizlet-os") { 1 } else { 2 })
+            .min(2);
+        let show_stats = match std::env::var("LITTLEPRINCE_STATS") {
+            Ok(v) => v != "0",
+            Err(_) => settings.stats.unwrap_or(true),
+        };
+        let mut snd = Sounds::new(audio);
+        snd.volume = settings.volume as f32 / 10.0;
+        let journeys = std::array::from_fn(|i| store.slot(i));
         let worlds: Vec<World> = KINDS.iter().map(|&k| World::new(k)).collect();
         let w = &worlds[0];
         let mut player = Player::new(w.spawn, w.surface(w.spawn));
@@ -119,7 +162,7 @@ impl App {
             cur: 0,
             worlds,
             fx: Fx::new(),
-            snd: Sounds::new(audio),
+            snd,
             fonts: Fonts::new(zoom),
             stats: Stats::new(),
             mode: Mode::Title,
@@ -128,15 +171,11 @@ impl App {
             t: 0.0,
             idle_t: 0.0,
             lang,
-            show_stats: !std::env::var("LITTLEPRINCE_STATS").is_ok_and(|v| v == "0"),
+            show_stats,
             hud: true,
             hero: Hero::load(&std::env::var("LITTLEPRINCE_HERO").unwrap_or_else(|_| HERO.to_string())),
             closeup: false,
-            fx_level: std::env::var("LITTLEPRINCE_FX")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(if cfg!(feature = "gizlet-os") { 1 } else { 2 })
-                .min(2),
+            fx_level,
             autoplay: false,
             quit_hold: 0.0,
             quit: false,
@@ -149,7 +188,190 @@ impl App {
             auto_dir: cam_fwd,
             auto_jump: 2.0,
             rng: Rng::new(11),
+            store,
+            settings,
+            slot: None,
+            journey: Journey::start(),
+            journeys,
+            menu: None,
+            save_t: 0.0,
+            sun_e: 0.0,
+            clock: 0.0,
         }
+    }
+
+    /// A value for `LITTLEPRINCE_SCRIPT` checks, by name (see `script`).
+    pub fn probe(&self, name: &str) -> String {
+        use crate::save::PLANETS;
+        let st = &self.journey.stats;
+        let planet = |name: &str| PLANETS.iter().position(|p| *p == name);
+        match name {
+            "mode" => format!("{:?}", self.mode).to_lowercase(),
+            "menu" => self.menu.as_ref().map_or("none".into(), |m| format!("{:?}", m.top().0).to_lowercase()),
+            "row" => self.menu.as_ref().map_or(0, |m| m.top().1).to_string(),
+            "planet" => PLANETS[self.cur].into(),
+            "lang" => if self.lang == Lang::Zh { "zh" } else { "en" }.into(),
+            "slot" => self.slot.map_or("none".into(), |s| (s + 1).to_string()),
+            "fx" => self.fx_level.to_string(),
+            "volume" => self.settings.volume.to_string(),
+            "invert" => (self.settings.invert as u8).to_string(),
+            "stats-panel" => (self.show_stats as u8).to_string(),
+            "autoplay" => (self.autoplay as u8).to_string(),
+            "time" => format!("{:.2}", st.time),
+            "distance" => format!("{:.2}", st.distance),
+            "jumps" => st.jumps.to_string(),
+            "sunsets" => st.sunsets.to_string(),
+            "sprouts" => st.sprouts.to_string(),
+            "flights" => st.flights.to_string(),
+            "visited" => self.journey.visited.iter().filter(|v| **v).count().to_string(),
+            "save-failed" => (self.store.failed as u8).to_string(),
+            "pulled-now" => self.world().sprouts_out().to_string(),
+            "flight-pose" => self.player.reach_target.to_string(),
+            _ => {
+                if let Some(p) = name.strip_prefix("score.").and_then(planet) {
+                    return self.worlds[p].score.to_string();
+                }
+                // `saved.N` is whether journey N is on disk, `saved.N.KEY`
+                // its planet or a statistic as written there.
+                if let Some(rest) = name.strip_prefix("saved.") {
+                    let (n, key) = rest.split_once('.').unwrap_or((rest, ""));
+                    let j = n.parse::<usize>().ok().and_then(|n| self.store.journey(n.checked_sub(1)?));
+                    return match (j, key) {
+                        (None, "") => "0".into(),
+                        (Some(_), "") => "1".into(),
+                        (Some(j), "planet") => PLANETS[j.planet].into(),
+                        (Some(j), "jumps") => j.stats.jumps.to_string(),
+                        (Some(j), "flights") => j.stats.flights.to_string(),
+                        (Some(j), "time") => format!("{:.2}", j.stats.time),
+                        (Some(j), "distance") => format!("{:.2}", j.stats.distance),
+                        (Some(j), "visited") => j.visited.iter().filter(|v| **v).count().to_string(),
+                        (Some(j), k) => match k.strip_prefix("score.").and_then(planet) {
+                            Some(p) => j.scores[p].to_string(),
+                            None => format!("unknown {name}"),
+                        },
+                        (None, _) => "none".into(),
+                    };
+                }
+                format!("unknown {name}")
+            }
+        }
+    }
+
+    /// Whether this is a journey being played by hand, whose progress counts.
+    fn counting(&self) -> bool {
+        self.slot.is_some() && !self.autoplay
+    }
+
+    /// Writes the journey being played, if any; whether that worked.
+    pub fn save_now(&mut self) -> bool {
+        let Some(slot) = self.slot else { return true };
+        self.journey.planet = self.cur;
+        self.journey.visited[self.cur] = true;
+        for (score, w) in self.journey.scores.iter_mut().zip(&self.worlds) {
+            *score = w.score;
+        }
+        let ok = self.store.save_journey(slot, &self.journey);
+        if ok {
+            self.journeys[slot] = Slot::Journey(self.journey.clone());
+        }
+        self.save_t = 0.0;
+        ok
+    }
+
+    /// Opens a menu page; the pause menu saves first.
+    pub fn open_menu(&mut self, page: Page) {
+        let row = match page {
+            Page::Journeys => {
+                self.journeys = std::array::from_fn(|i| self.store.slot(i));
+                self.settings.slot
+            }
+            Page::Pause => {
+                self.save_now();
+                0
+            }
+            _ => 0,
+        };
+        self.menu = Some(Menu::open(page, row));
+    }
+
+    /// Starts or continues journey `slot`.
+    fn load(&mut self, slot: usize) {
+        // A file that cannot be read is left alone: only deleting it, which
+        // moves it aside, frees the slot for a new journey.
+        let j = match self.store.slot(slot) {
+            Slot::Empty => Journey::start(),
+            Slot::Journey(j) => j,
+            Slot::Unreadable => {
+                self.journeys[slot] = Slot::Unreadable;
+                self.snd.play(Sfx::Land, 0.6, 0.4);
+                return;
+            }
+        };
+        for (w, score) in self.worlds.iter_mut().zip(j.scores) {
+            w.restore(score);
+        }
+        self.menu = None;
+        self.autoplay = false;
+        self.slot = Some(slot);
+        self.settings.slot = slot;
+        self.store.save_settings(&self.settings);
+        let planet = j.planet;
+        self.journey = j;
+        self.arrive_at(planet, 0.0);
+        self.player.reach_target = 0.0;
+        self.start_play(planet);
+        self.save_now();
+    }
+
+    fn act(&mut self, action: Action) {
+        match action {
+            Action::None => {}
+            Action::Close => self.menu = None,
+            Action::Load(slot) => self.load(slot),
+            Action::Clear(slot) => {
+                // Shown empty only once it is moved aside; otherwise the
+                // journeys page says the deletion failed.
+                if self.store.clear_journey(slot) {
+                    self.journeys[slot] = Slot::Empty;
+                    self.snd.play(Sfx::Splash, 0.8, 0.4);
+                }
+            }
+            // Only once the journey is safely written: otherwise the pause
+            // menu stays, telling why, with the journey still in play.
+            Action::SaveAndQuit => {
+                if self.save_now() {
+                    self.slot = None;
+                    self.menu = None;
+                    self.set_mode(Mode::Title);
+                }
+            }
+            Action::Change(setting, step) => self.change(setting, step),
+        }
+    }
+
+    fn change(&mut self, setting: Setting, step: i32) {
+        let s = &mut self.settings;
+        match setting {
+            Setting::Language => {
+                self.lang = if self.lang == Lang::Zh { Lang::En } else { Lang::Zh };
+                s.lang = Some(if self.lang == Lang::Zh { "zh" } else { "en" }.into());
+            }
+            Setting::Effects => {
+                self.fx_level = (self.fx_level as i32 + step).rem_euclid(3) as u8;
+                s.fx = Some(self.fx_level);
+            }
+            Setting::Performance => {
+                self.show_stats = !self.show_stats;
+                s.stats = Some(self.show_stats);
+            }
+            Setting::Volume => {
+                s.volume = (s.volume as i32 + step).clamp(0, 10) as u8;
+                self.snd.volume = s.volume as f32 / 10.0;
+            }
+            Setting::Invert => s.invert = !s.invert,
+        }
+        self.snd.play(Sfx::Chime(3), 1.0, 0.4);
+        self.store.save_settings(&self.settings);
     }
 
     pub fn world(&self) -> &World {
@@ -163,6 +385,10 @@ impl App {
 
     fn arrive_at(&mut self, idx: usize, alt: f32) {
         self.cur = idx;
+        self.sun_e = 0.0;
+        if self.counting() {
+            self.journey.visited[idx] = true;
+        }
         let w = &self.worlds[idx];
         let (n, r) = (w.spawn, w.surface(w.spawn));
         self.player.teleport(n, any_perp(n), r, alt);
@@ -184,6 +410,9 @@ impl App {
             return;
         }
         self.set_mode(Mode::Fly);
+        if self.counting() {
+            self.journey.stats.flights += 1;
+        }
         self.fly_to = (self.cur + 1) % self.worlds.len();
         self.switched = false;
         self.player.reach_target = 1.0;
@@ -236,9 +465,7 @@ impl App {
     }
 
     pub fn update(&mut self, dt: f32, c: &Controls) {
-        self.t += dt;
-        self.mode_t += dt;
-        self.planet_t += dt;
+        self.clock += dt;
         self.stats.update(dt);
         let combo = c.down(Button::Select) && c.down(Button::Start);
         if combo {
@@ -249,27 +476,76 @@ impl App {
         }
         let (mx, my) = c.movement();
         let (lx, ly) = c.look();
+        let ly = if self.settings.invert { -ly } else { ly };
         let any = ANY.iter().any(|b| c.pressed(*b)) || mx != 0.0 || my != 0.0 || lx != 0.0 || ly != 0.0;
-        self.look_t += dt;
         let mut input = !combo;
         if any {
             self.idle_t = 0.0;
             if self.autoplay {
                 self.autoplay = false;
                 input = false;
+                // Taking over from autoplay starts from a journey, so that
+                // what follows is saved.
+                if self.slot.is_none() {
+                    let cur = self.cur;
+                    self.arrive_at(cur, 0.0);
+                    // A flight cut short leaves no flight pose behind.
+                    self.player.reach_target = 0.0;
+                    self.set_mode(Mode::Title);
+                    self.open_menu(Page::Journeys);
+                }
             }
         } else {
             self.idle_t += dt;
         }
+        // A menu takes the buttons; over play, everything stands still.
+        if let Some(mut menu) = self.menu.take() {
+            let keys = Keys {
+                up: c.nav(Button::Up),
+                down: c.nav(Button::Down),
+                left: c.nav(Button::Left),
+                right: c.nav(Button::Right),
+                a: c.pressed(Button::A),
+                b: c.pressed(Button::B),
+                x: c.pressed(Button::X),
+                start: c.pressed(Button::Start),
+            };
+            let action = if input { menu.step(keys) } else { Action::None };
+            self.menu = Some(menu);
+            self.act(action);
+            input = false;
+            if self.mode != Mode::Title {
+                return;
+            }
+        }
+        self.t += dt;
+        self.mode_t += dt;
+        self.planet_t += dt;
+        self.look_t += dt;
         if input {
-            if c.pressed(Button::Select) {
-                self.show_stats = !self.show_stats;
-            }
-            if c.pressed(Button::Start) {
-                self.lang = if self.lang == Lang::Zh { Lang::En } else { Lang::Zh };
-            }
             if c.pressed(Button::Y) {
                 self.fx_level = (self.fx_level + 2) % 3;
+                self.settings.fx = Some(self.fx_level);
+                self.store.save_settings(&self.settings);
+            }
+            match self.mode {
+                Mode::Title if c.pressed(Button::Start) => self.open_menu(Page::Settings),
+                Mode::Title if c.pressed(Button::A) => self.open_menu(Page::Journeys),
+                Mode::Play if !self.autoplay && c.pressed(Button::Start) => self.open_menu(Page::Pause),
+                Mode::Play if !self.autoplay && c.pressed(Button::Select) => self.open_menu(Page::Statistics),
+                _ => {}
+            }
+            if self.menu.is_some() {
+                return;
+            }
+        }
+        if self.counting() {
+            if self.mode != Mode::Title {
+                self.journey.stats.time += dt as f64;
+            }
+            self.save_t += dt;
+            if self.save_t > AUTOSAVE {
+                self.save_now();
             }
         }
 
@@ -278,9 +554,7 @@ impl App {
         let n = self.player.n;
         match self.mode {
             Mode::Title => {
-                if input && c.pressed(Button::A) {
-                    self.start_play(self.cur);
-                } else if self.idle_t > IDLE_AUTOPLAY {
+                if self.idle_t > IDLE_AUTOPLAY && self.menu.is_none() {
                     self.autoplay = true;
                     self.start_play(self.cur);
                 }
@@ -292,9 +566,7 @@ impl App {
                         self.begin_flight();
                     }
                 } else if input {
-                    if c.pressed(Button::B) {
-                        self.set_mode(Mode::Title);
-                    } else if c.pressed(Button::X) {
+                    if c.pressed(Button::X) {
                         self.begin_flight();
                     }
                     wish = self.cam_fwd * -my + self.cam_fwd.cross(n) * mx;
@@ -323,6 +595,9 @@ impl App {
         let n = self.player.n;
         self.cam_fwd = self.cam_fwd.rotate(axis, ang).flatten(n).norm();
         let sp = self.player.speed();
+        if self.counting() && self.mode == Mode::Play && self.player.grounded {
+            self.journey.stats.distance += (sp * dt) as f64;
+        }
         if sp > 0.3 {
             let want = self.player.vel.norm();
             // Follow the walking direction, but not right after the player
@@ -344,8 +619,22 @@ impl App {
             h.update(dt, &motion);
         }
         let ps = PState { feet: self.player.feet(), face: self.player.face, speed: sp };
-        if self.worlds[self.cur].update(dt, t, &ps, &mut self.fx, &mut self.snd) {
+        let scored = self.worlds[self.cur].update(dt, t, &ps, &mut self.fx, &mut self.snd);
+        if scored {
             self.player.cheer = 1.0;
+        }
+        // Sunsets wherever the prince stands, on any planet.
+        let e = self.player.n.dot(self.world().sun(t));
+        let sunset = self.mode == Mode::Play && self.sun_e > 0.0 && e <= 0.0;
+        self.sun_e = e;
+        if self.counting() {
+            self.journey.stats.sprouts += self.worlds[self.cur].pulled as u32;
+            if sunset {
+                self.journey.stats.sunsets += 1;
+            }
+            if scored {
+                self.save_now();
+            }
         }
         self.fx.update(dt);
         self.update_camera(dt);
@@ -382,6 +671,7 @@ impl App {
                 self.player.reach_target = 0.0;
                 self.player.cheer = 1.0;
                 self.start_play(self.cur);
+                self.save_now();
             }
         }
     }
@@ -395,6 +685,7 @@ impl App {
             Kind::Desert => rgb(0xF0D3A0),
         };
         let cols = [dust, lighten(dust, 0.3)];
+        let counting = self.counting();
         for ev in self.player.events.drain(..) {
             match ev {
                 Ev::Step(p) => {
@@ -404,6 +695,9 @@ impl App {
                     self.snd.play(Sfx::Step, self.rng.range(0.85, 1.2), 0.3);
                 }
                 Ev::Jump(p) => {
+                    if counting {
+                        self.journey.stats.jumps += 1;
+                    }
                     let up = p.norm();
                     self.fx.burst(p, up, puff(6, &cols, 0.8));
                     self.fx.ring(p, up, 0.35, 0.4, rgba(dust, 0.7));

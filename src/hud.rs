@@ -5,6 +5,8 @@
 use crate::app::{App, Mode};
 use crate::gl::{lighten, rgb, rgba};
 use crate::math::{clamp01, smooth};
+use crate::menu::{Menu, Page, PauseItem, Setting, PAUSE, SETTINGS};
+use crate::save::Slot;
 use crate::text::{s, Align, Lang, Weight, T};
 use raylib_sys::{self as ffi, Camera2D, Color, Rectangle, RenderTexture2D, Vector2};
 use std::cell::RefCell;
@@ -56,11 +58,11 @@ pub fn prepare(app: &App, k: f32) {
             }
         }
         let cache = c.get_or_insert_with(|| Cache { rt: unsafe { ffi::LoadRenderTexture(w, h) }, key, at: -1.0 });
-        if cache.key == key && app.t - cache.at < 0.25 && cache.at >= 0.0 {
+        if cache.key == key && app.clock - cache.at < 0.25 && cache.at >= 0.0 {
             return;
         }
         cache.key = key;
-        cache.at = app.t;
+        cache.at = app.clock;
         unsafe {
             ffi::BeginTextureMode(cache.rt);
             ffi::ClearBackground(Color { r: 0, g: 0, b: 0, a: 0 });
@@ -130,6 +132,9 @@ pub fn draw(app: &App) {
     if !crate::prof::skip("hudcache") {
         blit_cache();
     }
+    if let Some(m) = &app.menu {
+        menu(app, m);
+    }
     if app.quit_hold > 0.15 {
         let f = &app.fonts;
         let k = clamp01(app.quit_hold / 2.0);
@@ -194,7 +199,15 @@ fn title(app: &App) {
     f.shadowed(s(T::CreditUrl, l), 320.0, 405.0, 13.0, rgba(LINK, a), Align::Center, Weight::Text);
     f.shadowed(s(T::Book, l), 320.0, 426.0, 11.0, rgba(SOFT, a * 0.9), Align::Center, Weight::Text);
     f.shadowed(s(T::TestNote, l), 320.0, 444.0, 11.0, rgba(SOFT, a * 0.75), Align::Center, Weight::Text);
-    f.shadowed(&format!("Start · {}", s(T::Lang, l)), 632.0, 10.0, 11.0, rgba(SOFT, 0.7), Align::Right, Weight::Text);
+    f.shadowed(
+        &format!("Start · {}", s(T::Settings, l)),
+        632.0,
+        10.0,
+        11.0,
+        rgba(SOFT, 0.7),
+        Align::Right,
+        Weight::Text,
+    );
 }
 
 fn play(app: &App) {
@@ -248,14 +261,13 @@ fn bar(app: &App) {
     // The prompt bar.
     let fx = [T::FxLow, T::FxMid, T::FxHigh][app.fx_level as usize];
     let effects = format!("{} {}", s(T::Effects, l), s(fx, l));
-    let items: [(&str, &str); 7] = [
+    let items: [(&str, &str); 6] = [
         ("A", s(T::Jump, l)),
         ("X", s(T::Travel, l)),
         (s(T::RStick, l), s(T::Camera, l)),
         ("Y", &effects),
-        ("Select", s(T::Stats, l)),
-        ("Start", s(T::Lang, l)),
-        ("B", s(T::Back, l)),
+        ("Select", s(T::Statistics, l)),
+        ("Start", s(T::Menu, l)),
     ];
     let size = 11.0;
     let widths: Vec<(f32, f32)> = items
@@ -274,6 +286,147 @@ fn bar(app: &App) {
         x += aw + 12.0;
     }
     f.shadowed(s(T::CreditShort, l), 632.0, 434.0, 11.0, rgba(SOFT, 0.75), Align::Right, Weight::Text);
+}
+
+/// `h:mm:ss`, or `m:ss` under an hour.
+pub fn clock(secs: f64) -> String {
+    let t = secs.max(0.0) as u64;
+    let (h, m, s) = (t / 3600, t / 60 % 60, t % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
+}
+
+const PLANET_NAMES: [T; 3] = [T::B612, T::Lamp, T::Desert];
+
+/// The statistics of the journey being played, as label and value.
+fn statistics(app: &App) -> Vec<(String, String)> {
+    let l = app.lang;
+    let st = &app.journey.stats;
+    let visited = app.journey.visited.iter().filter(|v| **v).count();
+    vec![
+        (s(T::PlayTime, l).into(), clock(st.time)),
+        (s(T::Distance, l).into(), format!("{:.0} {}", st.distance, s(T::Metres, l))),
+        (s(T::Jumps, l).into(), st.jumps.to_string()),
+        (s(T::SunsetsSeen, l).into(), st.sunsets.to_string()),
+        (s(T::SproutsPulled, l).into(), st.sprouts.to_string()),
+        (s(T::Flights, l).into(), st.flights.to_string()),
+        (s(T::Visited, l).into(), format!("{visited}/3")),
+    ]
+}
+
+/// A menu page over the scene: a panel with a title, its rows and the
+/// buttons to use.
+fn menu(app: &App, m: &Menu) {
+    let f = &app.fonts;
+    let l = app.lang;
+    let (page, sel) = m.top();
+    let key = |b: &str, t: T| format!("{b} {}", s(t, l));
+    let (title, row_h, rows, hint): (T, f32, Vec<(String, String)>, String) = match page {
+        Page::Journeys => {
+            let rows = app
+                .journeys
+                .iter()
+                .enumerate()
+                .map(|(i, j)| {
+                    let head = format!("{} {}", s(T::Journey, l), i + 1);
+                    match j {
+                        Slot::Journey(j) => {
+                            let visited = j.visited.iter().filter(|v| **v).count();
+                            (
+                                format!("{head} · {}", s(PLANET_NAMES[j.planet], l)),
+                                format!(
+                                    "{} · {} {visited}/3 · {} {}",
+                                    clock(j.stats.time),
+                                    s(T::Visited, l),
+                                    s(T::SunsetsSeen, l),
+                                    j.stats.sunsets
+                                ),
+                            )
+                        }
+                        Slot::Empty => (head, s(T::NewJourney, l).into()),
+                        Slot::Unreadable => (head, s(T::Unreadable, l).into()),
+                    }
+                })
+                .collect();
+            let hint = [key("A", T::Choose), key("X", T::Delete), key("B", T::GoBack)].join("   ");
+            (T::Journeys, 50.0, rows, hint)
+        }
+        Page::Pause => {
+            let rows = PAUSE
+                .iter()
+                .map(|p| {
+                    let t = match p {
+                        PauseItem::Resume => T::Resume,
+                        PauseItem::Settings => T::Settings,
+                        PauseItem::Statistics => T::Statistics,
+                        PauseItem::SaveAndQuit => T::SaveQuit,
+                    };
+                    (s(t, l).to_string(), String::new())
+                })
+                .collect();
+            (T::Paused, 32.0, rows, [key("A", T::Choose), key("B", T::Resume)].join("   "))
+        }
+        Page::Settings => {
+            let on = |b: bool| s(if b { T::On } else { T::Off }, l).to_string();
+            let rows = SETTINGS
+                .iter()
+                .map(|st| {
+                    let (t, v) = match st {
+                        Setting::Language => (T::Language, s(T::LangName, l).to_string()),
+                        Setting::Effects => {
+                            (T::Effects, s([T::FxLow, T::FxMid, T::FxHigh][app.fx_level as usize], l).into())
+                        }
+                        Setting::Performance => (T::Performance, on(app.show_stats)),
+                        Setting::Volume => (T::Volume, format!("{}", app.settings.volume)),
+                        Setting::Invert => (T::Invert, on(app.settings.invert)),
+                    };
+                    (s(t, l).to_string(), format!("<  {v}  >"))
+                })
+                .collect();
+            (T::Settings, 32.0, rows, [format!("←→ {}", s(T::Change, l)), key("B", T::GoBack)].join("   "))
+        }
+        Page::Statistics => (T::Statistics, 26.0, statistics(app), key("B", T::GoBack)),
+    };
+    let w = 360.0;
+    let h = 52.0 + rows.len() as f32 * row_h + 40.0;
+    let (x, y) = (320.0 - w / 2.0, (240.0 - h / 2.0).max(8.0));
+    unsafe { ffi::DrawRectangle(0, 0, 640, 480, rgba(PANEL, 0.35)) };
+    rrect(x, y, w, h, 14.0, rgba(PANEL, 0.9));
+    f.text(s(title, l), 320.0, y + 14.0, 20.0, CREAM, Align::Center);
+    let selectable = page != Page::Statistics;
+    for (i, (a, b)) in rows.iter().enumerate() {
+        let ry = y + 52.0 + i as f32 * row_h;
+        let chosen = selectable && i == sel;
+        if chosen {
+            rrect(x + 12.0, ry - 2.0, w - 24.0, row_h - 4.0, 8.0, rgba(GOLD, 0.22));
+        }
+        let col = if chosen { rgb(0xFFFFFF) } else { CREAM };
+        match page {
+            Page::Journeys => {
+                f.text(a, x + 26.0, ry + 4.0, 14.0, col, Align::Left);
+                f.text(b, x + 26.0, ry + 24.0, 11.0, SOFT, Align::Left);
+            }
+            Page::Pause => {
+                f.text(a, 320.0, ry + 5.0, 14.0, col, Align::Center);
+            }
+            _ => {
+                f.text(a, x + 26.0, ry + 5.0, 13.0, col, Align::Left);
+                f.text(b, x + w - 26.0, ry + 5.0, 13.0, if chosen { GOLD } else { SOFT }, Align::Right);
+            }
+        }
+    }
+    let (hint, col) = if m.confirm.is_some() {
+        (format!("X {}", s(T::ConfirmDelete, l)), rgb(0xFF8A7A))
+    } else if app.store.failed {
+        let t = if page == Page::Journeys { T::DeleteFailed } else { T::SaveFailed };
+        (s(t, l).to_string(), rgb(0xFF8A7A))
+    } else {
+        (hint, SOFT)
+    };
+    f.text(&hint, 320.0, y + h - 28.0, 11.0, col, Align::Center);
 }
 
 fn opt(v: Option<f32>, digits: usize) -> String {

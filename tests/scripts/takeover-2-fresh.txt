@@ -1,0 +1,13 @@
+# Autoplay pulls up sprouts on B612; a journey started after taking over
+# begins with the planet as it first was, nothing pulled.
+21.0 check autoplay = 1
+21.0 check score.b612 >= 1
+21.0 check pulled-now >= 1
+21.5 press right
+21.8 check menu = journeys
+22.0 press down
+22.2 press a               # journey 2: the first replay of this group used 1
+22.6 check slot = 2
+22.6 check score.b612 = 0
+22.6 check pulled-now = 0
+22.8 quit

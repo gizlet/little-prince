@@ -33,13 +33,23 @@ actions = { zh-CN = "行走" }
 
 [[controls]]
 button = "a"
-action = "Jump"
-actions = { zh-CN = "跳跃" }
+action = "Jump; choose in menus"
+actions = { zh-CN = "跳跃；在菜单中选择" }
+
+[[controls]]
+button = "b"
+action = "Back in menus"
+actions = { zh-CN = "在菜单中返回" }
 
 [[controls]]
 button = "x"
 action = "Fly to the next planet"
 actions = { zh-CN = "飞往下一颗星球" }
+
+[[controls]]
+button = "y"
+action = "Effects: high, mid, low"
+actions = { zh-CN = "切换特效：高、中、低" }
 
 [[controls]]
 button = "l"
@@ -53,8 +63,13 @@ actions = { zh-CN = "向右转动镜头" }
 
 [[controls]]
 button = "start"
-action = "Switch language"
-actions = { zh-CN = "切换语言" }
+action = "Pause menu: settings, statistics, save"
+actions = { zh-CN = "暂停菜单：设置、统计、存档" }
+
+[[controls]]
+button = "select"
+action = "Statistics"
+actions = { zh-CN = "统计" }
 
 [[packages]]
 target = "aarch64-unknown-linux-gnu"

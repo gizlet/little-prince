@@ -131,6 +131,8 @@ pub struct Controls {
     stick: (f32, f32),
     look: (f32, f32),
     swap_ab: bool,
+    /// Buttons a `LITTLEPRINCE_SCRIPT` replay holds down.
+    pub scripted: Vec<Button>,
     #[cfg(all(target_os = "linux", feature = "gizlet-os"))]
     evdev: crate::evdev::Evdev,
 }
@@ -145,6 +147,7 @@ impl Controls {
             stick: (0.0, 0.0),
             look: (0.0, 0.0),
             swap_ab: std::env::var("GIZLET_SWAP_AB").is_ok_and(|v| v == "1"),
+            scripted: Vec::new(),
             #[cfg(all(target_os = "linux", feature = "gizlet-os"))]
             evdev: crate::evdev::Evdev::default(),
         }
@@ -191,6 +194,9 @@ impl Controls {
         }
         if self.swap_ab {
             pad.buttons.swap(Button::A as usize, Button::B as usize);
+        }
+        for b in &self.scripted {
+            pad.set(*b);
         }
         let (x, y) = (pad.axes[0], pad.axes[1]);
         self.stick = walking_stick(x, y);

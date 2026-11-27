@@ -1,0 +1,11 @@
+# Delete journey 1: X asks, a second X moves it aside.
+0.5 check saved.1 = 1
+1.0 press a
+1.3 check menu = journeys
+1.5 press x
+1.8 check saved.1 = 1
+2.0 press x
+2.3 check saved.1 = 0
+2.5 press b
+2.8 check menu = none
+3.0 quit

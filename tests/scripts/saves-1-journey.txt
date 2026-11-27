@@ -1,0 +1,38 @@
+# Start a journey, walk and jump, change two settings, then save and return
+# to the title.
+0.5 check mode = title
+1.0 press a
+1.3 check menu = journeys
+1.5 press a                 # journey 1, empty: a new one
+2.0 check mode = play
+2.0 check slot = 1
+2.0 check saved.1 = 1
+2.5 press right 3
+3.0 press a
+4.0 press a
+6.0 check jumps >= 2
+6.0 check distance >= 2
+6.5 press start
+6.8 check menu = pause
+7.0 press down
+7.2 press a                 # settings
+7.5 check menu = settings
+7.7 press right             # language
+8.0 check lang = en
+8.2 press down
+8.4 press down
+8.6 press down              # volume
+8.8 press left
+9.0 check volume = 7
+9.2 press b
+9.4 check menu = pause
+9.4 check row = 1           # back on "settings"
+9.5 press up                # resume
+9.7 press up                # wraps round to "save and return"
+9.9 check row = 3
+10.0 press a
+10.3 check mode = title
+10.3 check slot = none
+10.3 check saved.1.jumps >= 2
+10.3 check saved.1.planet = b612
+10.5 quit

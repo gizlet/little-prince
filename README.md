@@ -39,19 +39,22 @@ cargo run --release
 | Keys | Button | Action |
 | --- | --- | --- |
 | Arrows or WASD | D-pad / stick | Walk |
-| Space, Enter or K | A | Jump; start on the title |
+| Space, Enter or K | A | Jump; on the title, choose a journey; in menus, choose |
 | I | X | Fly to the next planet |
 | Q / E, R / F | Right stick | Turn the camera left and right, up and down |
 | U | Y | Effects: high, mid, low |
-| Tab | Select | Show or hide the stats |
-| Esc or P | Start | 中文 / English |
-| Backspace or J | B | Back to the title |
+| Tab | Select | Statistics |
+| Esc or P | Start | Pause menu: resume, settings, statistics, save and return to the title; settings on the title |
+| Backspace or J | B | Back, in menus |
+
+Pressing A on the title opens the three journeys: choose one to continue it, or an empty one to start; X twice moves the chosen journey aside (to `slotN.txt.old`). The game saves on arriving at a planet, on scoring, when the pause menu opens, on returning to the title and on quitting, and every minute. The settings hold the language, effects level, performance panel, volume and inverted camera, for all journeys.
 
 Left alone on the title for 12 seconds, it plays by itself (autoplay) and moves on to the next planet every 26 seconds. Hold Select + Start for two seconds to quit.
 
 | Variable | Effect |
 | --- | --- |
-| `GIZLET_LANG=en` | Start in English |
+| `GIZLET_LANG=en` | Start in English, unless a language was chosen in the settings |
+| `GIZLET_SAVE_DIR=DIR` | Where journeys (`slot1.txt` to `slot3.txt`) and `settings.txt` are kept; `./save` by default. Gizlet OS sets it for each app |
 | `GIZLET_SWAP_AB=1` | Swap A and B |
 | `LITTLEPRINCE_WINDOW=WxH` | Desktop window size (1280x960 by default) |
 | `LITTLEPRINCE_AUTOPLAY=1` | Start autoplay at once |
@@ -64,11 +67,15 @@ Left alone on the title for 12 seconds, it plays by itself (autoplay) and moves 
 | `LITTLEPRINCE_SKIP=hero,heroink,skin,world,grass,props,flowers,backdrop,sky,alpha,glass,glow,bloom` | Leave parts out, for measuring their cost |
 | `LITTLEPRINCE_FPS=60` | Frame rate cap; `0` leaves the pace to the display |
 | `LITTLEPRINCE_SECONDS=80` | Quit after that many seconds, for scripted runs |
-| `LITTLEPRINCE_CAPTURE=FILE.png` | Render one frame to a PNG and exit; `LITTLEPRINCE_SCENE` is `title`, `b612`, `lamp`, `desert`, `fly`, `model` or `icon`, and `LITTLEPRINCE_AT` the seconds of autoplay before it |
+| `LITTLEPRINCE_CAPTURE=FILE.png` | Render one frame to a PNG and exit, saving nothing; `LITTLEPRINCE_SCENE` is `title`, `b612`, `lamp`, `desert`, `fly`, `journeys`, `pause`, `settings`, `statistics`, `model` or `icon`, and `LITTLEPRINCE_AT` the seconds of autoplay before it |
+| `LITTLEPRINCE_SCRIPT=FILE` | Replay the button presses in FILE at 60 steps a second, checking the game's state as it goes; exits with status 1 if a check fails (format in `src/script.rs`) |
 
 ```sh
 cargo test
+scripts/play-tests.sh
 ```
+
+`scripts/play-tests.sh` plays the button replays in `tests/scripts` on the desktop build, each group of them on a fresh save folder: starting a journey, coming back to it, deleting it.
 
 ## Run on Gizlet OS
 
@@ -120,7 +127,10 @@ Do not pin the GPU clock by hand: setting `min_freq` of `/sys/class/devfreq/ff40
 | `src/mesh.rs` | Mesh building, planets, grass, cells |
 | `src/fx.rs` | Particles and ripples |
 | `src/sound.rs` | Synthesized sound effects |
-| `src/hud.rs`, `src/text.rs` | The HUD, strings in Chinese and English, font atlases |
+| `src/hud.rs`, `src/text.rs` | The HUD and menus, strings in Chinese and English, font atlases |
+| `src/save.rs` | Journeys and settings on disk |
+| `src/menu.rs` | The journeys, pause, settings and statistics pages and what their buttons do |
+| `src/script.rs`, `tests/scripts`, `scripts/play-tests.sh` | Button replays and the ones played as tests |
 | `src/stats.rs` | CPU, memory, temperature and clock readings |
 | `src/prof.rs` | The frame profiler |
 | `src/input.rs`, `src/evdev.rs` | Keyboard, gamepads and the handheld's evdev devices (from [gizlet/overeaten](https://github.com/gizlet/overeaten)) |

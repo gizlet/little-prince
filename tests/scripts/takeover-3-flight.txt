@@ -1,0 +1,14 @@
+# Autoplay flies on after 26 seconds on a planet; taking over mid-flight
+# leaves no flight pose behind.
+39.0 check autoplay = 1
+39.0 check mode = fly
+39.0 check flight-pose = 1
+39.2 press right
+39.5 check autoplay = 0
+39.5 check mode = title
+39.5 check menu = journeys
+39.5 check flight-pose = 0
+39.7 press a
+40.0 check mode = play
+40.0 check flight-pose = 0
+40.2 quit
