@@ -3,9 +3,9 @@
 //! planet and the desert where the fox is tamed, and migrating birds carry
 //! it between them; the HUD shows FPS, CPU load and free memory.
 //!
-//! The planets follow Antoine de Saint-Exupéry's book. The hero is KayKit
-//! Adventurers' hooded Rogue by Kay Lousberg (CC0); every other model and
-//! effect here is written from scratch and made in code.
+//! The planets follow Antoine de Saint-Exupéry's book. The hero is the little
+//! prince from gizlet/blender-models (CC0); every other model and effect here
+//! is written from scratch and made in code.
 //!
 //! Environment:
 //! - `GIZLET_LANG=en`: start in English (Simplified Chinese otherwise).

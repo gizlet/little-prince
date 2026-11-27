@@ -1,10 +1,10 @@
-//! The hero: a rigged, animated character loaded from a glTF file (KayKit
-//! Adventurers by Kay Lousberg, CC0), drawn with the same toon light and ink
-//! outline as the rest of the world.
+//! The hero: the little prince, a rigged, animated character loaded from a
+//! glTF file (the game export of gizlet/blender-models, CC0), drawn with the
+//! same toon light and ink outline as the rest of the world.
 //!
 //! raylib's own animation path skins every vertex on the CPU and inverts a
 //! matrix per vertex and bone, too slow for the handheld. Here raylib only
-//! loads the file: the body, hat and cape are merged into one mesh carrying
+//! loads the file: the body, hair and scarf are merged into one mesh carrying
 //! bone indices (in the colour attribute) and weights (in the tangent
 //! attribute), the bone matrices are worked out here from two blended
 //! animations, and the GPU does the skinning (`Gl::draw_skinned`).
@@ -17,6 +17,12 @@ use std::ffi::{CStr, CString};
 use std::path::PathBuf;
 
 type M = [f32; 16];
+
+/// How fast the ground moves under the planted foot when `Walk` and `Run`
+/// play at their own pace, in hero heights a second. Playing them at the
+/// hero's speed over these keeps the feet from sliding.
+const WALK_STRIDE: f32 = 0.89;
+const RUN_STRIDE: f32 = 2.1;
 
 /// raymath's MatrixMultiply: `l` applied first, then `r`.
 fn mul(l: &M, r: &M) -> M {
@@ -118,6 +124,9 @@ struct Ids {
 
 /// The outline's vertex merging grid: this many cells from feet to head.
 const INK_CELLS: f32 = 24.0;
+/// Parts smaller than this share of the height (eyes, buttons, fingers) get
+/// no outline of their own.
+const INK_MIN_PART: f32 = 0.05;
 
 pub struct Hero {
     pub name: String,
@@ -232,7 +241,8 @@ impl Hero {
             let (foot, top) = ys.fold((f32::MAX, f32::MIN), |(a, b), y| (a.min(y), b.max(y)));
             let tex = tex?;
             ffi::SetTextureFilter(tex, ffi::TextureFilter::TEXTURE_FILTER_BILINEAR as i32);
-            let ink_idx = crate::mesh::cluster(&pos, &idx, (top - foot) / INK_CELLS);
+            let ink_shells = crate::mesh::large_shells(&pos, &idx, (top - foot) * INK_MIN_PART);
+            let ink_idx = crate::mesh::cluster(&pos, &ink_shells, (top - foot) / INK_CELLS);
             let meshes = [0, 1].map(|_| crate::mesh::upload_skinned(&pos, &nrm, Some(&uv), &idx));
             let ink = [0, 1].map(|_| crate::mesh::upload_skinned(&pos, &nrm, None, &ink_idx));
             let bone_ids = ids;
@@ -241,10 +251,10 @@ impl Hero {
             let find = |want: &[&str]| want.iter().find_map(|n| names.iter().position(|x| x == n)).unwrap_or(0);
             let ids = Ids {
                 idle: find(&["Idle", "Unarmed_Idle"]),
-                walk: find(&["Walking_A", "Walking_B"]),
-                run: find(&["Running_A", "Running_B"]),
-                jump: find(&["Jump_Idle"]),
-                land: find(&["Jump_Land"]),
+                walk: find(&["Walk", "Walking_A"]),
+                run: find(&["Run", "Running_A"]),
+                jump: find(&["Jump", "Jump_Idle"]),
+                land: find(&["Land", "Jump_Land"]),
                 cheer: find(&["Cheer"]),
             };
             let cur = Track { anim: ids.idle, t: 0.0, rate: 1.0, looped: true };
@@ -323,14 +333,15 @@ impl Hero {
     pub fn update(&mut self, dt: f32, m: &Motion) {
         self.land_t = (self.land_t - dt).max(0.0);
         let ids = (self.ids.idle, self.ids.walk, self.ids.run, self.ids.jump, self.ids.land, self.ids.cheer);
+        let (walk, run) = (WALK_STRIDE * crate::app::HERO_H, RUN_STRIDE * crate::app::HERO_H);
         if m.flying || !m.grounded {
             self.play(ids.3, 1.0, true);
         } else if self.land_t > 0.0 && m.speed < 0.6 {
             self.play(ids.4, 1.3, false);
         } else if m.speed > 1.25 {
-            self.play(ids.2, (m.speed / 2.2).clamp(0.8, 1.4), true);
+            self.play(ids.2, (m.speed / run).clamp(1.0, 2.2), true);
         } else if m.speed > 0.12 {
-            self.play(ids.1, (m.speed / 0.75).clamp(0.5, 1.6), true);
+            self.play(ids.1, (m.speed / walk).clamp(0.6, 2.2), true);
         } else if m.cheer > 0.5 {
             self.play(ids.5, 1.0, true);
         } else {

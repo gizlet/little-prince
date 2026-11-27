@@ -309,6 +309,55 @@ pub fn cluster(pos: &[f32], idx: &[u16], cell: f32) -> Vec<u16> {
     out
 }
 
+/// The triangles of the closed shells at least `min` across (the diagonal of
+/// their bounding box). Vertices at the same position belong to one shell.
+/// Small shells such as eyes, buttons and fingers sit on larger ones; an
+/// outline drawn around each of them smears dark rings over the surface.
+pub fn large_shells(pos: &[f32], idx: &[u16], min: f32) -> Vec<u16> {
+    fn root(parent: &mut [usize], mut v: usize) -> usize {
+        while parent[v] != v {
+            parent[v] = parent[parent[v]];
+            v = parent[v];
+        }
+        v
+    }
+    fn join(parent: &mut [usize], a: usize, b: usize) {
+        let (ra, rb) = (root(parent, a), root(parent, b));
+        if ra != rb {
+            parent[ra] = rb;
+        }
+    }
+    let n = pos.len() / 3;
+    let mut parent: Vec<usize> = (0..n).collect();
+    let mut at: std::collections::HashMap<[u32; 3], usize> = std::collections::HashMap::new();
+    for v in 0..n {
+        let key = [pos[v * 3].to_bits(), pos[v * 3 + 1].to_bits(), pos[v * 3 + 2].to_bits()];
+        let first = *at.entry(key).or_insert(v);
+        join(&mut parent, v, first);
+    }
+    for t in idx.chunks(3) {
+        join(&mut parent, t[0] as usize, t[1] as usize);
+        join(&mut parent, t[1] as usize, t[2] as usize);
+    }
+    let mut bounds: std::collections::HashMap<usize, ([f32; 3], [f32; 3])> = std::collections::HashMap::new();
+    for v in 0..n {
+        let r = root(&mut parent, v);
+        let b = bounds.entry(r).or_insert(([f32::MAX; 3], [f32::MIN; 3]));
+        for k in 0..3 {
+            b.0[k] = b.0[k].min(pos[v * 3 + k]);
+            b.1[k] = b.1[k].max(pos[v * 3 + k]);
+        }
+    }
+    let mut out = Vec::new();
+    for t in idx.chunks(3) {
+        let (lo, hi) = bounds[&root(&mut parent, t[0] as usize)];
+        if (0..3).map(|k| (hi[k] - lo[k]).powi(2)).sum::<f32>().sqrt() >= min {
+            out.extend_from_slice(t);
+        }
+    }
+    out
+}
+
 /// The 20 faces of an icosahedron, subdivided `n` times onto the unit sphere.
 pub fn icosphere(n: u32) -> Vec<[V3; 3]> {
     let t = (1.0 + 5f32.sqrt()) / 2.0;
@@ -1011,6 +1060,16 @@ impl Kit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn outlines_leave_out_small_parts_on_larger_ones() {
+        let quad = |x: f32, s: f32| [x, 0.0, 0.0, x + s, 0.0, 0.0, x + s, s, 0.0, x, s, 0.0];
+        let mut pos: Vec<f32> = [quad(0.0, 1.0), quad(2.0, 0.02)].concat();
+        let mut idx: Vec<u16> = vec![0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7];
+        pos.extend_from_slice(&[1.0, 1.0, 0.0, 1.0, 2.0, 0.0]);
+        idx.extend_from_slice(&[2, 8, 9]);
+        assert_eq!(large_shells(&pos, &idx, 0.1), vec![0, 1, 2, 0, 2, 3, 2, 8, 9]);
+    }
 
     #[test]
     fn the_cell_finder_agrees_with_a_search_of_every_cell() {

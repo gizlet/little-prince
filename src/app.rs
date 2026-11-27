@@ -36,7 +36,7 @@ const PITCH: f32 = 0.26;
 const PITCH_MIN: f32 = -0.2;
 const PITCH_MAX: f32 = 1.2;
 /// The default hero model and its height in world units.
-const HERO: &str = "Rogue_Hooded";
+const HERO: &str = "little-prince";
 pub const HERO_H: f32 = 0.42;
 /// Seconds on the title before autoplay starts by itself.
 const IDLE_AUTOPLAY: f32 = 12.0;
