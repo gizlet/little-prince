@@ -227,8 +227,9 @@ impl Controls {
         } else {
             (0.0, 0.0)
         };
-        unsafe {
-            let key = |k: K| ffi::IsKeyDown(k as i32) as i32 as f32;
+        // The camera keys too stay out of replays.
+        if !self.replay {
+            let key = |k: K| unsafe { ffi::IsKeyDown(k as i32) } as i32 as f32;
             let kx = key(K::KEY_E) - key(K::KEY_Q);
             let ky = key(K::KEY_F) - key(K::KEY_R);
             if kx != 0.0 || ky != 0.0 {
