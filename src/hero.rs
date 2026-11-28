@@ -1,5 +1,5 @@
 //! The hero: the little prince, a rigged, animated character loaded from a
-//! glTF file (the game export of gizlet/blender-models, CC0), drawn with the
+//! glTF file (the CC0 game export of models/little-prince), drawn with the
 //! same toon light and ink outline as the rest of the world.
 //!
 //! raylib's own animation path skins every vertex on the CPU and inverts a

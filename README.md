@@ -23,7 +23,7 @@ A 3D game for [Gizlet OS](https://github.com/gizlet/os) handhelds such as the R3
 ## Credits
 
 - **The story** is Antoine de Saint-Exupéry's *Le Petit Prince* (1943). The planets follow the book: B612 with its volcanoes, rose and baobab sprouts, the lamplighter's planet, and the desert where the fox is tamed. The book is in the public domain in most countries but not everywhere, and "Le Petit Prince" is a registered trademark. Keep this demo non-commercial.
-- **The hero** is the little prince from [gizlet/blender-models](https://github.com/gizlet/blender-models), our own rigged and animated model (CC0, [license](assets/hero/LICENSE.txt)). `assets/hero/little-prince.glb` is its game export; edit the `.blend` there and export it again with `scripts/build.py -- little-prince --game`. The title screen and a corner credit during play name it.
+- **The hero** is our own rigged and animated little prince (CC0, [license](assets/hero/LICENSE.txt)). The [Blender source and export instructions](models/little-prince) are in this repository. The game uses `assets/hero/little-prince.glb`.
 - **The lamplighter and the fox** are Quaternius's CC0 "Worker" and "Fox" ([license and sources](assets/npc/LICENSE.txt)), recoloured and converted by `scripts/npc.py`. Thank you!
 - **Everything else** is written from scratch and made in code at start-up: the planets, grass, flowers, trees, rocks, the biplane, the birds, the troubles, particles, shaders and sound effects.
 

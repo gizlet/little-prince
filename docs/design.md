@@ -55,12 +55,10 @@ planet cheap to draw.
 
 ## The prince
 
-There is one hero, the little prince. His model is made in
-[gizlet/blender-models](https://github.com/gizlet/blender-models) and its game
-export lives in `assets/hero/little-prince.glb`. The hero is loaded from one
-file with named animations (`Idle`, `Walk`, `Run`, `Jump`, `Land`, `Cheer`),
-so updating the model touches only `assets/hero`, and the stride constants in
-`src/hero.rs` if the walk or run changes.
+There is one hero, the little prince. His [Blender source](../models/little-prince)
+is in `models/little-prince/`, and the game loads `assets/hero/little-prince.glb`
+with named animations (`Idle`, `Walk`, `Run`, `Jump`, `Land`, `Cheer`). Update
+the stride constants in `src/hero.rs` if the walk or run changes.
 
 ## The storybook
 

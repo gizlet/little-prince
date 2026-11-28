@@ -342,11 +342,11 @@ pub fn s(t: T, l: Lang) -> &'static str {
         T::Title => ("小王子", "The Little Prince"),
         T::Subtitle => ("星球漫游 · Gizlet OS 上的 3D 游戏", "A planet walk · a 3D game for Gizlet OS"),
         T::PressStart => ("按 A 翻开书", "Press A to open the book"),
-        T::Credit => ("小王子模型来自我们的开源模型库，以 CC0 免费开放", "The prince comes from our free, open model library (CC0)"),
-        T::CreditUrl => ("github.com/gizlet/blender-models", "github.com/gizlet/blender-models"),
+        T::Credit => ("小王子模型由我们制作，以 CC0 免费开放", "The prince is our own model, released under CC0"),
+        T::CreditUrl => ("github.com/gizlet/little-prince", "github.com/gizlet/little-prince"),
         T::Book => ("原著：安托万·德·圣-埃克苏佩里《小王子》（1943）", "After Antoine de Saint-Exupéry's The Little Prince (1943)"),
         T::TestNote => ("Gizlet OS 上用 Rust + raylib 从零编写的 3D 游戏，其余模型与特效均由代码生成", "A 3D game for Gizlet OS written from scratch in Rust + raylib; every other model and effect is made in code"),
-        T::CreditShort => ("角色：gizlet/blender-models", "Hero: gizlet/blender-models"),
+        T::CreditShort => ("角色：gizlet/little-prince", "Hero: gizlet/little-prince"),
         T::B612 => ("B612 · 小王子的星球", "B612 · The Prince's Planet"),
         T::B612Hint => ("拔掉蔓延的幼苗，扫扫火山，跳到毛毛虫身上让它变成蝴蝶，再去看看玫瑰", "Pull up the spreading sprouts, sweep the volcanoes, jump on the caterpillars to make butterflies of them, then visit the rose"),
         T::Lamp => ("点灯人的星球", "The Lamplighter's Planet"),
@@ -717,7 +717,7 @@ mod tests {
 
     #[test]
     fn the_credit_names_the_source() {
-        assert_eq!(s(T::CreditUrl, Lang::Zh), "github.com/gizlet/blender-models");
+        assert_eq!(s(T::CreditUrl, Lang::Zh), "github.com/gizlet/little-prince");
     }
 
     #[test]

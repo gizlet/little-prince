@@ -1,11 +1,11 @@
 The Little Prince model (little-prince.glb)
 
-From https://github.com/gizlet/blender-models, exported from
+Source: https://github.com/gizlet/little-prince
+
+Exported from
 models/little-prince/little-prince.blend with
 
-    blender --background --factory-startup --python scripts/build.py -- little-prince --game
-
-which writes dist/little-prince-game.glb.
+    blender --background --factory-startup --python-exit-code 1 --python scripts/export-hero.py
 
 The model is dedicated to the public domain under CC0 1.0 Universal:
 https://creativecommons.org/publicdomain/zero/1.0/
