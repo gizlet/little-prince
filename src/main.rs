@@ -3,9 +3,8 @@
 //! planet and the desert where the fox is tamed, and migrating birds carry
 //! it between them; the HUD shows FPS, CPU load and free memory.
 //!
-//! The planets follow Antoine de Saint-Exupéry's book. The hero is the little
-//! prince from gizlet/blender-models (CC0); every other model and effect here
-//! is written from scratch and made in code.
+//! The planets follow Antoine de Saint-Exupéry's book. The CC0 hero model
+//! lives in models/little-prince alongside its Blender source.
 //!
 //! Environment:
 //! - `GIZLET_LANG=en`: start in English (Simplified Chinese otherwise).
