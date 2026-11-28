@@ -18,11 +18,32 @@ use std::path::PathBuf;
 
 type M = [f32; 16];
 
-/// How fast the ground moves under the planted foot when `Walk` and `Run`
-/// play at their own pace, in hero heights a second. Playing them at the
-/// hero's speed over these keeps the feet from sliding.
-const WALK_STRIDE: f32 = 0.89;
-const RUN_STRIDE: f32 = 2.1;
+/// The animations a character plays, by the names they may have in its
+/// file, and how fast the ground moves under the planted foot when `walk`
+/// and `run` play at their own pace, in heights a second: playing them at
+/// the character's speed over these keeps the feet from sliding.
+pub struct Names {
+    pub idle: &'static [&'static str],
+    pub walk: &'static [&'static str],
+    pub run: &'static [&'static str],
+    pub jump: &'static [&'static str],
+    pub land: &'static [&'static str],
+    pub cheer: &'static [&'static str],
+    pub walk_stride: f32,
+    pub run_stride: f32,
+}
+
+/// The little prince (and KayKit's characters, whose names differ).
+pub const PRINCE: Names = Names {
+    idle: &["Idle", "Unarmed_Idle"],
+    walk: &["Walk", "Walking_A"],
+    run: &["Run", "Running_A"],
+    jump: &["Jump", "Jump_Idle"],
+    land: &["Land", "Jump_Land"],
+    cheer: &["Cheer"],
+    walk_stride: 0.89,
+    run_stride: 2.1,
+};
 
 /// raymath's MatrixMultiply: `l` applied first, then `r`.
 fn mul(l: &M, r: &M) -> M {
@@ -160,6 +181,13 @@ pub struct Hero {
     /// Model units from the feet to the top of the head.
     pub height: f32,
     foot: f32,
+    /// How tall it is drawn, for pacing its walk.
+    pub drawn: f32,
+    walk_stride: f32,
+    run_stride: f32,
+    bone_names: Vec<String>,
+    /// Where each joint is this frame, in model units.
+    joints: Vec<[f32; 3]>,
 }
 
 /// Where the app's assets are: beside the binary on the device, in the
@@ -183,7 +211,11 @@ fn cname(raw: &[std::ffi::c_char]) -> String {
 
 impl Hero {
     pub fn load(name: &str) -> Option<Hero> {
-        let path = assets_dir().join("hero").join(format!("{name}.glb"));
+        Hero::load_from(&assets_dir().join("hero").join(format!("{name}.glb")), name, &PRINCE)
+    }
+
+    /// Loads a character from `path`, playing the animations `want` names.
+    pub fn load_from(path: &std::path::Path, name: &str, want: &Names) -> Option<Hero> {
         if !path.is_file() {
             eprintln!("littleprince: no hero model at {}", path.display());
             return None;
@@ -250,12 +282,12 @@ impl Hero {
             let names: Vec<String> = (0..count as usize).map(|i| cname(&(*anims.add(i)).name)).collect();
             let find = |want: &[&str]| want.iter().find_map(|n| names.iter().position(|x| x == n)).unwrap_or(0);
             let ids = Ids {
-                idle: find(&["Idle", "Unarmed_Idle"]),
-                walk: find(&["Walk", "Walking_A"]),
-                run: find(&["Run", "Running_A"]),
-                jump: find(&["Jump", "Jump_Idle"]),
-                land: find(&["Land", "Jump_Land"]),
-                cheer: find(&["Cheer"]),
+                idle: find(want.idle),
+                walk: find(want.walk),
+                run: find(want.run),
+                jump: find(want.jump),
+                land: find(want.land),
+                cheer: find(want.cheer),
             };
             let cur = Track { anim: ids.idle, t: 0.0, rate: 1.0, looped: true };
             let mut h = Hero {
@@ -283,6 +315,11 @@ impl Hero {
                 palette: vec![[0.0; 4]; bones * 4],
                 height: top - foot,
                 foot,
+                drawn: crate::app::HERO_H,
+                walk_stride: want.walk_stride,
+                run_stride: want.run_stride,
+                joints: vec![[0.0; 3]; bones],
+                bone_names,
             };
             h.pose();
             Some(h)
@@ -333,7 +370,7 @@ impl Hero {
     pub fn update(&mut self, dt: f32, m: &Motion) {
         self.land_t = (self.land_t - dt).max(0.0);
         let ids = (self.ids.idle, self.ids.walk, self.ids.run, self.ids.jump, self.ids.land, self.ids.cheer);
-        let (walk, run) = (WALK_STRIDE * crate::app::HERO_H, RUN_STRIDE * crate::app::HERO_H);
+        let (walk, run) = (self.walk_stride * self.drawn, self.run_stride * self.drawn);
         if m.flying || !m.grounded {
             self.play(ids.3, 1.0, true);
         } else if self.land_t > 0.0 && m.speed < 0.6 {
@@ -367,6 +404,7 @@ impl Hero {
             pose = old.iter().zip(&pose).map(|(a, b)| blend(a, b, k)).collect();
         }
         for (b, t) in pose.iter().enumerate() {
+            self.joints[b] = [t.translation.x, t.translation.y, t.translation.z];
             let m = mul(&self.bind_inv[b], &srt(t));
             for c in 0..4 {
                 self.palette[b * 4 + c] = [m[c * 4], m[c * 4 + 1], m[c * 4 + 2], m[c * 4 + 3]];
@@ -419,10 +457,24 @@ impl Hero {
         }
     }
 
+    /// The matrix that stands the model at `f` (unit axes: right, up,
+    /// forward), `h` tall.
+    fn placed(&self, f: &Frame, h: f32) -> Matrix {
+        let k = h / self.height.max(1e-3);
+        basis(f.x * k, f.y * k, f.z * k, f.o - f.y * (self.foot * k))
+    }
+
+    /// Where the joint `name` is this frame, drawn standing at `f`, `h` tall.
+    pub fn joint(&self, name: &str, f: &Frame, h: f32) -> Option<V3> {
+        let b = self.bone_names.iter().position(|n| n == name)?;
+        let [x, y, z] = self.joints[b];
+        let k = h / self.height.max(1e-3);
+        Some(f.o + f.x * (x * k) + f.y * ((y - self.foot) * k) + f.z * (z * k))
+    }
+
     /// Draws the hero standing at `f` (unit axes: right, up, forward), `h` tall.
     pub fn draw(&self, gl: &Gl, f: &Frame, h: f32) {
-        let k = h / self.height.max(1e-3);
-        let m: Matrix = basis(f.x * k, f.y * k, f.z * k, f.o - f.y * (self.foot * k));
+        let m = self.placed(f, h);
         let ink = gl.hero_outline_enabled().then(|| {
             let mesh = self.ink[self.buf];
             if self.ink_dirty.replace(false) {

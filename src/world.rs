@@ -18,7 +18,7 @@ use crate::math::{any_perp, approach, place, smooth, v3, Frame, Rng, V3};
 use crate::mesh::{self, no_sway, Builder, Group, Kit, Tile};
 use crate::sound::{Sfx, Sounds};
 use crate::text::T;
-use crate::trouble::{self, Caterpillar, Cinder, Dust};
+use crate::trouble::{self, Caterpillar, Cinder, Devil, Dust, Moth, PlanePart};
 use raylib_sys::{Color, Mesh};
 use std::f32::consts::{PI, TAU};
 
@@ -54,6 +54,11 @@ impl Kind {
 }
 
 const FOX_TRUST: usize = 5;
+/// Snuffer moths to shoo away from the lamp.
+const MOTHS: usize = 6;
+/// The sandstorm's cycle in seconds, and how long it stays calm first.
+const STORM_CYCLE: f32 = 52.0;
+const STORM_CALM: f32 = 30.0;
 
 /// The sun's height before the prince has seen it, on arriving or loading.
 const UNSEEN: f32 = 0.0;
@@ -454,6 +459,8 @@ struct LampPost {
     head: V3,
     lit: bool,
     on: f32,
+    /// Seconds the lamplighter stares at his snuffed lamp before lighting it again.
+    out: f32,
 }
 
 struct Keeper {
@@ -463,6 +470,16 @@ struct Keeper {
     /// The lighting or snuffing in progress: seconds in, and the new state.
     anim: Option<(f32, bool)>,
     raise: f32,
+    /// Where his model's hand is this frame, when he is drawn from one.
+    hand: Option<V3>,
+}
+
+/// A character drawn from a model: where it stands, how fast it moves and
+/// whether it is busy (the lamplighter at his lamp, the fox sitting).
+pub struct Actor {
+    pub frame: Frame,
+    pub speed: f32,
+    pub busy: bool,
 }
 
 struct Fox {
@@ -498,7 +515,9 @@ impl Fox {
     }
 
     /// Advances the fox and returns whether it gained a point of trust.
-    fn update(&mut self, dt: f32, p: &PState, fx: &mut Fx, snd: &mut Sounds) -> bool {
+    /// Once tamed it follows the prince, or trots to `lead` to show him
+    /// something buried there.
+    fn update(&mut self, dt: f32, p: &PState, lead: Option<V3>, fx: &mut Fx, snd: &mut Sounds) -> bool {
         let mut scored = false;
         let r = ground_r(Kind::Desert, self.n);
         let pos = self.n * r;
@@ -547,7 +566,7 @@ impl Fox {
             }
         } else {
             let right = p.feet.norm().cross(p.face);
-            let spot = p.feet - p.face * 0.55 + right * 0.4;
+            let spot = lead.unwrap_or(p.feet - p.face * 0.55 + right * 0.4);
             if (spot - pos).len() > 0.25 {
                 target = Some((spot, (((spot - pos).len() - 0.1) * 3.0).min(2.6)));
             }
@@ -629,6 +648,16 @@ pub struct World {
     /// but pulled sprouts grow back and can be pulled again.
     pub pulled: usize,
     pub pop: f32,
+    moths: Vec<Moth>,
+    moth_t: f32,
+    devils: Vec<Devil>,
+    plane_parts: Vec<PlanePart>,
+    /// How strong the sandstorm is now, 0 to 1, and seconds into its cycle.
+    pub storm: f32,
+    storm_t: f32,
+    /// Whether the lamplighter and the fox are drawn from models by the app
+    /// rather than built from shapes here.
+    pub models: bool,
     /// The task's parts: done so far, needed and what they are. `score`
     /// and `total` are their sums.
     pub parts: [usize; 3],
@@ -734,6 +763,13 @@ impl World {
             total: 0,
             pulled: 0,
             pop: 0.0,
+            moths: Vec::new(),
+            moth_t: 0.0,
+            devils: Vec::new(),
+            plane_parts: Vec::new(),
+            storm: 0.0,
+            storm_t: 0.0,
+            models: false,
             parts: [0; 3],
             needs: [0; 3],
             labels: [T::Sprouts; 3],
@@ -949,7 +985,7 @@ impl World {
                 mesh::frustum(&mut props, base, ln, 12, (0.0, 0.07, 0.08, 0.045), iron, &no_sway, true);
                 mesh::frustum(&mut props, base, ln, 10, (0.0, 0.02, 0.84, 0.016), iron, &no_sway, true);
                 mesh::frustum(&mut props, base + ln * 0.84, ln, 10, (0.0, 0.03, 0.03, 0.03), iron, &no_sway, true);
-                w.lamp = Some(LampPost { n: ln, head: base + ln * 0.93, lit: false, on: 0.0 });
+                w.lamp = Some(LampPost { n: ln, head: base + ln * 0.93, lit: false, on: 0.0, out: 0.0 });
                 let kn = ln.rotate(any_perp(ln).rotate(ln, 1.2), ang(0.25));
                 taken.push(kn);
                 w.keeper = Some(Keeper {
@@ -958,6 +994,7 @@ impl World {
                     face: (base - kn * r(kn)).flatten(kn).norm(),
                     anim: None,
                     raise: 0.0,
+                    hand: None,
                 });
                 // A bare, stony little world: boulders, pebbles, and a few
                 // flowers and tufts sheltering between them.
@@ -986,8 +1023,9 @@ impl World {
                     (0.04, 0.1),
                     &[rgb(0x8FB070), rgb(0xA0BE7A)],
                 );
-                // Three sunsets, watched where the lamplighter can see them.
-                w.total = 3;
+                // Three sunsets, and the moths kept from the lamp at night.
+                w.needs = [3, MOTHS, 0];
+                w.labels = [T::Sunsets, T::Moths, T::Sunsets];
             }
             Kind::Desert => {
                 // The biplane, nose down in the sand.
@@ -1060,6 +1098,17 @@ impl World {
                 let fox = Fox::new(spawn);
                 taken.push(fox.n);
                 w.fox = Some(fox);
+                // Four parts thrown from the aeroplane: two lie in the open,
+                // two the sand has covered, for the fox to find.
+                for (shape, (f, s, buried)) in
+                    [(3.4, -2.6, false), (0.4, -3.4, false), (9.5, 3.0, true), (-6.5, 4.5, true)]
+                        .into_iter()
+                        .enumerate()
+                {
+                    let n = spot_at(rad, f, s);
+                    taken.push(n);
+                    w.plane_parts.push(PlanePart { n, shape, buried, found: false, shown: 0.0 });
+                }
                 let wheat = spot_at(rad, 0.7, 2.2);
                 let field_edge = within(1.6);
                 let off_field = within(2.4);
@@ -1107,10 +1156,11 @@ impl World {
                     (0.06, 0.14),
                     &[rgb(0xB59A5A), rgb(0xA08850), rgb(0xC2AE70)],
                 ));
-                w.total = FOX_TRUST;
+                w.needs = [FOX_TRUST, 4, 0];
+                w.labels = [T::Tamed, T::PlaneParts, T::Tamed];
             }
         }
-        if kind != Kind::B612 {
+        if w.needs == [0; 3] {
             w.needs = [w.total, 0, 0];
             w.labels = [w.name().2; 3];
         }
@@ -1247,13 +1297,26 @@ impl World {
                     None => self.rose.as_ref().map(|r| Goal { at: r.pos, arrive: 0.55, still: true, hop: false }),
                 }
             }
-            Kind::Lamp => None,
-            Kind::Desert => self.fox.as_ref().filter(|f| f.trust < FOX_TRUST).map(|f| Goal {
-                at: on(f.n),
-                arrive: Fox::preferred_distance(f.trust) + 0.35,
-                still: true,
-                hop: false,
-            }),
+            Kind::Lamp => {
+                let moth = self.moths.iter().filter(|m| m.coming()).map(|m| on(m.n)).min_by(dist);
+                if let Some(at) = moth {
+                    return Some(Goal { at, arrive: 0.0, still: false, hop: true });
+                }
+                // Keep watch by the lamp until the task is done.
+                let lamp = self.lamp.as_ref().filter(|_| !self.ready()).map(|l| on(l.n));
+                lamp.map(|at| Goal { at, arrive: 1.3, still: true, hop: false })
+            }
+            Kind::Desert => {
+                if let Some(f) = self.fox.as_ref().filter(|f| f.trust < FOX_TRUST) {
+                    return Some(Goal {
+                        at: on(f.n),
+                        arrive: Fox::preferred_distance(f.trust) + 0.35,
+                        still: true,
+                        hop: false,
+                    });
+                }
+                self.plane_parts.iter().filter(|q| !q.found).map(|q| on(q.n)).min_by(dist).map(walk)
+            }
         }
     }
 
@@ -1264,21 +1327,36 @@ impl World {
     /// `swept` lists the active volcanoes already swept, by their order
     /// among the active ones; `None` (saves before it was kept) counts them
     /// from the first.
-    pub fn restore(&mut self, parts: [usize; 3], swept: Option<u8>) {
+    pub fn restore(&mut self, parts: [usize; 3], marks: Option<u8>) {
         let mut parts = parts;
         let active = self.volcanoes.iter().filter(|v| v.active).count();
-        let marks = mark_swept(active, parts[1], swept);
-        if self.kind == Kind::B612 {
-            parts[1] = marks.iter().filter(|m| **m).count();
+        let swept = mark_swept(active, parts[1], marks);
+        let found = mark_swept(self.plane_parts.len(), parts[1], marks);
+        let count = |m: &[bool]| m.iter().filter(|m| **m).count();
+        match self.kind {
+            Kind::B612 => parts[1] = count(&swept),
+            Kind::Desert => parts[1] = count(&found),
+            Kind::Lamp => {}
+        }
+        for (q, f) in self.plane_parts.iter_mut().zip(found) {
+            q.found = f;
+            q.shown = 0.0;
+        }
+        self.moths.clear();
+        self.moth_t = 0.0;
+        self.devils.clear();
+        self.storm = 0.0;
+        self.storm_t = 0.0;
+        if let Some(l) = &mut self.lamp {
+            l.out = 0.0;
         }
         for (have, (saved, need)) in self.parts.iter_mut().zip(parts.into_iter().zip(self.needs)) {
             *have = saved.min(need);
         }
         self.score = self.parts.iter().sum();
-        let s = self.score;
         self.pulled = 0;
         self.sprouts.truncate(self.first_sprouts);
-        for (v, swept) in self.volcanoes.iter_mut().filter(|v| v.active).zip(marks) {
+        for (v, swept) in self.volcanoes.iter_mut().filter(|v| v.active).zip(swept) {
             v.swept = swept;
             v.sweep = 0.0;
             v.pressure = 0.0;
@@ -1302,8 +1380,33 @@ impl World {
         }
         if self.fox.is_some() {
             let mut fox = Fox::new(self.spawn);
-            fox.trust = s;
+            fox.trust = self.parts[0];
             self.fox = Some(fox);
+        }
+    }
+
+    /// The aeroplane parts found so far, bit `i` for the `i`th, for the save.
+    pub fn found(&self) -> u8 {
+        self.plane_parts.iter().enumerate().filter(|(_, q)| q.found).fold(0, |m, (i, _)| m | 1 << i)
+    }
+
+    /// Moves the sandstorm's cycle to just after it rises, for captures.
+    pub fn skip_to_storm(&mut self) {
+        self.storm_t = STORM_CALM + 4.0;
+    }
+
+    /// Snuffer moths flying at the lamp.
+    pub fn moths_coming(&self) -> usize {
+        self.moths.iter().filter(|m| m.coming()).count()
+    }
+
+    /// The push of the sandstorm's wind at `n`, as a share of walking pace.
+    pub fn storm_push(&self, n: V3) -> V3 {
+        let w = self.pal.wind.flatten(n);
+        if w.len() < 1e-4 {
+            V3::ZERO
+        } else {
+            w.norm() * (0.15 * self.storm)
         }
     }
 
@@ -1340,6 +1443,30 @@ impl World {
         self.total > 0 && self.score >= self.total
     }
 
+    /// The lamplighter, for drawing him from a model.
+    pub fn keeper_actor(&self) -> Option<Actor> {
+        self.keeper.as_ref().map(|k| Actor {
+            frame: Frame::new(k.pos, k.n, k.face),
+            speed: 0.0,
+            busy: k.anim.is_some(),
+        })
+    }
+
+    /// Where the lamplighter's model holds his pole this frame.
+    pub fn set_keeper_hand(&mut self, hand: Option<V3>) {
+        if let Some(k) = &mut self.keeper {
+            k.hand = hand;
+        }
+    }
+
+    /// The fox, for drawing it from a model.
+    pub fn fox_actor(&self) -> Option<Actor> {
+        self.fox.as_ref().map(|f| {
+            let at = f.n * ground_r(self.kind, f.n);
+            Actor { frame: Frame::new(at, f.n, f.face), speed: f.speed, busy: f.sit > 0.6 }
+        })
+    }
+
     /// Where the planet's character stands: the rose, the lamplighter or
     /// the fox.
     pub fn speaker(&self) -> Option<V3> {
@@ -1348,17 +1475,6 @@ impl World {
             Kind::Lamp => self.keeper.as_ref().map(|k| k.pos),
             Kind::Desert => self.fox.as_ref().map(|f| f.n * ground_r(self.kind, f.n)),
         }
-    }
-
-    /// Sets the score of a planet whose task has one part.
-    fn set_score(&mut self, s: usize) -> bool {
-        let up = s > self.score;
-        if up {
-            self.pop = 1.0;
-        }
-        self.score = s;
-        self.parts[0] = s;
-        up
     }
 
     /// Adds `k` to part `i` of the task, up to what it needs; whether that
@@ -1599,6 +1715,202 @@ impl World {
         scored
     }
 
+    /// The lamplighter's night watch: snuffer moths come out of the dark
+    /// for the lamp. Landing near one, or jumping into it, shoos it off as a
+    /// firefly; one that reaches the lamp puts it out for a while; walking
+    /// into one knocks the prince back. Returns true when a moth was shooed.
+    fn update_moths(&mut self, dt: f32, sun: V3, p: &PState, fx: &mut Fx, snd: &mut Sounds) -> bool {
+        let Some(ln) = self.lamp.as_ref().map(|l| l.n) else { return false };
+        let kind = self.kind;
+        let rad = kind.radius();
+        let ground = move |n: V3| ground_r(kind, n);
+        let night = ln.dot(sun) < -0.1;
+        let top = 0.93;
+        self.moth_t -= dt;
+        if night && self.moths_coming() < 2 && self.moth_t <= 0.0 {
+            self.moth_t = self.rng.range(1.5, 2.6);
+            let side = any_perp(ln).rotate(ln, self.rng.range(0.0, TAU));
+            let n = ln.rotate(side, self.rng.range(2.6, 3.6) / rad).norm();
+            let phase = self.rng.f() * TAU;
+            self.moths.push(Moth::new(n, ln, phase));
+        }
+        let (mut snuffed, mut shooed, mut bump) = (false, Vec::new(), None);
+        let up = p.feet.norm();
+        for m in &mut self.moths {
+            if m.update(dt, ln, top, rad) {
+                m.flee = Some(0.0);
+                snuffed = true;
+                continue;
+            }
+            if !m.coming() {
+                continue;
+            }
+            if !night {
+                // Off into the daylight.
+                m.flee = Some(0.0);
+                continue;
+            }
+            let at = m.pos(&ground);
+            let flat = (at - p.feet).flatten(up).len();
+            let near_jump = !p.grounded && (at - (p.feet + up * 0.3)).len() < 0.42;
+            if (p.landed && flat < 0.65) || near_jump {
+                m.flee = Some(0.0);
+                shooed.push(at);
+            } else if p.grounded && flat < 0.18 && m.alt < 0.75 {
+                bump = Some(at);
+            }
+        }
+        self.moths.retain(|m| !m.gone());
+        let mut scored = false;
+        for at in shooed {
+            scored |= self.add_part(1, 1);
+            self.handled += 1;
+            self.dust.scatter(at.norm(), 2, rad);
+            fx.burst(
+                at,
+                at.norm(),
+                Burst {
+                    n: 14,
+                    speed: (0.2, 0.7),
+                    size: (0.02, 0.045),
+                    life: (0.8, 1.6),
+                    cols: &[rgb(0xD8FF8A), rgb(0xFFF4B0)],
+                    glow: true,
+                    grav: -0.4,
+                    drag: 1.4,
+                    aim: 0.4,
+                },
+            );
+            snd.play(Sfx::Chime(5), 1.3, 0.35);
+        }
+        if snuffed {
+            if let Some(l) = self.lamp.as_mut().filter(|l| l.lit) {
+                l.lit = false;
+                l.out = 1.6;
+                fx.burst(
+                    l.head,
+                    l.n,
+                    Burst {
+                        n: 12,
+                        speed: (0.2, 0.5),
+                        size: (0.04, 0.08),
+                        life: (0.8, 1.4),
+                        cols: &[rgb(0x9A94A8), rgb(0xC9C4D6)],
+                        glow: false,
+                        grav: -0.3,
+                        drag: 1.2,
+                        aim: 0.7,
+                    },
+                );
+                snd.play(Sfx::Pop, 0.5, 0.4);
+            }
+        }
+        if let Some(at) = bump {
+            self.knock(at);
+        }
+        scored
+    }
+
+    /// The desert: the sandstorm comes and goes, raising dust devils that
+    /// knock the prince back; the fox, once tamed, digs up the buried
+    /// aeroplane parts; walking over a part picks it up.
+    fn update_desert(&mut self, dt: f32, p: &PState, fx: &mut Fx, snd: &mut Sounds) -> bool {
+        let kind = self.kind;
+        let rad = kind.radius();
+        let on = move |n: V3| n * ground_r(kind, n);
+        let mut scored = false;
+        self.storm_t += dt;
+        let c = self.storm_t % STORM_CYCLE;
+        self.storm = smooth((c - STORM_CALM) / 3.0) * (1.0 - smooth((c - STORM_CALM - 16.0) / 3.0));
+        let up = p.feet.norm();
+        let wind = self.pal.wind.flatten(up);
+        let wind = if wind.len() < 1e-4 { any_perp(up) } else { wind.norm() };
+        for _ in 0..3 {
+            if self.rng.f() < dt * 40.0 * self.storm {
+                let side = any_perp(up).rotate(up, self.rng.range(0.0, TAU));
+                let at = p.feet + side * self.rng.range(0.3, 3.0) + up * self.rng.range(0.05, 0.9) - wind * 1.5;
+                let v = wind * self.rng.range(2.0, 3.5) + up * self.rng.range(-0.1, 0.2);
+                let mut g =
+                    Particle::new(at, v, self.rng.range(0.8, 1.4), self.rng.range(0.015, 0.03), rgb(0xE2BC86), false);
+                g.drag = 0.2;
+                g.grav = 0.0;
+                fx.spawn(g);
+            }
+        }
+        if self.storm > 0.6 && self.devils.len() < 2 && self.rng.f() < dt * 0.8 {
+            let side = any_perp(up).rotate(up, self.rng.range(0.0, TAU));
+            let n = up.rotate(side, self.rng.range(3.0, 4.5) / rad).norm();
+            let face = (up - n).flatten(n).norm();
+            let life = self.rng.range(7.0, 10.0);
+            self.devils.push(Devil::new(n, face, life));
+        }
+        for d in &mut self.devils {
+            d.update(dt, up, rad);
+        }
+        self.devils.retain(|d| d.life > 0.0);
+        let hit = self.devils.iter().find(|d| d.strength() > 0.5 && (on(d.n) - p.feet).len() < 0.35).map(|d| on(d.n));
+        if let Some(at) = hit {
+            self.knock(at);
+        }
+        // Once tamed, the fox shows where the sand hides a part.
+        let tamed = self.fox.as_ref().is_some_and(|f| f.trust >= FOX_TRUST);
+        let lead = if tamed {
+            self.plane_parts
+                .iter()
+                .filter(|q| q.buried && q.shown <= 0.0 && !q.found && (on(q.n) - p.feet).len() < 7.0)
+                .map(|q| on(q.n))
+                .min_by(|a, b| (*a - p.feet).len().total_cmp(&(*b - p.feet).len()))
+        } else {
+            None
+        };
+        if let Some(fox) = &mut self.fox {
+            scored |= fox.update(dt, p, lead, fx, snd);
+        }
+        let fox_at = self.fox.as_ref().map(|f| on(f.n));
+        for q in &mut self.plane_parts {
+            if q.shown > 0.0 {
+                q.shown += dt;
+            } else if tamed && q.buried && !q.found && fox_at.is_some_and(|f| (on(q.n) - f).len() < 0.45) {
+                q.shown = 0.001;
+                fx.burst(
+                    on(q.n),
+                    q.n,
+                    Burst {
+                        n: 18,
+                        speed: (0.4, 1.0),
+                        size: (0.03, 0.06),
+                        life: (0.5, 1.0),
+                        cols: &[rgb(0xE2BC86), rgb(0xC99A60)],
+                        glow: false,
+                        grav: 3.0,
+                        drag: 1.0,
+                        aim: 0.7,
+                    },
+                );
+                snd.play(Sfx::Chime(3), 1.2, 0.4);
+            }
+        }
+        let mut got = 0;
+        for q in self.plane_parts.iter_mut().filter(|q| q.visible()) {
+            if (on(q.n) - p.feet).len() < 0.45 {
+                q.found = true;
+                got += 1;
+                fx.ring(on(q.n), q.n, 0.7, 0.7, rgb(0xFFE9A8));
+                snd.play(Sfx::Chime(6), 1.0, 0.45);
+            }
+        }
+        if got > 0 {
+            scored |= self.add_part(1, got);
+            self.handled += got as u32;
+            self.dust.scatter(up, 2 * got, rad);
+        }
+        let trust = self.fox.as_ref().map_or(0, |f| f.trust);
+        if trust > self.parts[0] {
+            scored |= self.add_part(0, trust - self.parts[0]);
+        }
+        scored
+    }
+
     /// Advances the planet. Returns true when the prince achieved something.
     pub fn update(&mut self, dt: f32, t: f32, p: &PState, fx: &mut Fx, snd: &mut Sounds) -> bool {
         self.pop = (self.pop - dt * 2.5).max(0.0);
@@ -1719,8 +2031,9 @@ impl World {
             Kind::Lamp => {
                 if let (Some(lamp), Some(k)) = (&mut self.lamp, &mut self.keeper) {
                     let want = lamp.n.dot(sun) < 0.02;
+                    lamp.out = (lamp.out - dt).max(0.0);
                     match &mut k.anim {
-                        None if want != lamp.lit => k.anim = Some((0.0, want)),
+                        None if want != lamp.lit && lamp.out <= 0.0 => k.anim = Some((0.0, want)),
                         Some((u, to)) => {
                             let before = *u;
                             *u += dt;
@@ -1760,20 +2073,17 @@ impl World {
                 // Count the sunsets the prince sees where he stands.
                 let e = up.dot(sun);
                 if sets(self.last_e, e) {
-                    scored |= self.set_score((self.score + 1).min(self.total));
+                    scored |= self.add_part(0, 1);
                     snd.play(Sfx::Chime(0), 0.8, 0.3);
                 }
                 self.last_e = e;
             }
             Kind::Desert => {
-                if let Some(fox) = &mut self.fox {
-                    scored |= fox.update(dt, p, fx, snd);
-                }
+                scored |= self.update_desert(dt, p, fx, snd);
             }
         }
-        if self.kind == Kind::Desert {
-            let s = self.fox.as_ref().map_or(0, |f| f.trust);
-            self.set_score(s);
+        if self.kind == Kind::Lamp {
+            scored |= self.update_moths(dt, sun, p, fx, snd);
         }
         // Shooting stars on clear nights.
         let night = self.sky(up, t).stars;
@@ -1913,6 +2223,12 @@ impl World {
         for c in self.caterpillars.iter().filter(|c| near(c.n)) {
             c.draw(gl, kit, &ground);
         }
+        for m in self.moths.iter().filter(|m| near(m.n)) {
+            m.draw(gl, kit, &ground);
+        }
+        for q in self.plane_parts.iter().filter(|q| near(q.n)) {
+            q.draw(gl, kit, &ground, t);
+        }
         for c in self.cinders.iter().filter(|_| troubles) {
             let at = c.pos(&ground);
             gl.part(kit.ball, place(at, c.to, any_perp(c.to), v3(0.05, 0.05, 0.05)), rgb(0x6A2A18), 0.6, Ink::None);
@@ -2010,9 +2326,13 @@ impl World {
             gl.part(kit.stub, place(l.head - l.n * 0.075, l.n, x, v3(0.045, 0.02, 0.045)), iron, 0.0, ri);
         }
         if let Some(k) = &self.keeper {
-            self.draw_keeper(gl, kit, k, t);
+            if self.models {
+                World::draw_pole(gl, kit, k);
+            } else {
+                self.draw_keeper(gl, kit, k, t);
+            }
         }
-        if let Some(f) = &self.fox {
+        if let Some(f) = self.fox.as_ref().filter(|_| !self.models) {
             draw_fox(gl, kit, f, ground_r(self.kind, f.n), t);
         }
         if let Some(f) = &self.prop {
@@ -2036,13 +2356,13 @@ impl World {
         let f = Frame::new(k.pos, k.n, k.face);
         let rest = f.at(v3(0.11, 0.2, 0.06));
         let up = f.at(v3(0.09, 0.42, 0.12));
-        let hand = rest.lerp(up, k.raise);
+        let hand = k.hand.unwrap_or_else(|| rest.lerp(up, k.raise));
         let pole_dir = f.dir(v3(0.05, 1.0, 0.12).lerp(v3(-0.05, 1.0, 0.55), k.raise)).norm();
         (f, hand, hand + pole_dir * 0.62)
     }
 
     fn draw_keeper(&self, gl: &Gl, kit: &Kit, k: &Keeper, t: f32) {
-        let (f, hand, tip) = World::keeper_pose(k);
+        let (f, hand, _) = World::keeper_pose(k);
         let coat = rgb(0x4A5E9E);
         let navy = rgb(0x2D3561);
         let skin = rgb(0xFFE0C8);
@@ -2063,14 +2383,7 @@ impl World {
         gl.part(kit.ball, place(hand, k.n, k.face, v3(0.026, 0.026, 0.026)), skin, 0.0, ri);
         kit.limb(gl, b.at(v3(-0.09, 0.34, 0.0)), b.at(v3(-0.12, 0.19, 0.02)), 0.026, coat);
         gl.part(kit.ball, b.part(v3(-0.12, 0.18, 0.02), v3(0.026, 0.026, 0.026)), skin, 0.0, ri);
-        let pd = tip - hand;
-        gl.part(
-            kit.tube,
-            place(hand - pd * 0.15, pd, k.face, v3(0.008, pd.len() * 1.15, 0.008)),
-            rgb(0x8A5A3B),
-            0.0,
-            ri,
-        );
+        World::draw_pole(gl, kit, k);
         let head = b.moved(v3(0.0, 0.45, 0.0)).turned(0, -k.raise * 0.35 + (t * 0.8).sin() * 0.03);
         gl.part(kit.ball, head.part(V3::ZERO, v3(0.1, 0.1, 0.095)), skin, 0.0, ri);
         gl.part(kit.ball, head.part(v3(0.0, -0.01, 0.095), v3(0.024, 0.022, 0.022)), rgb(0xF4A9A0), 0.0, Ink::None);
@@ -2088,6 +2401,19 @@ impl World {
         gl.part(kit.ball, head.part(v3(0.0, 0.055, 0.075), v3(0.075, 0.01, 0.05)), rgb(0x232845), 0.0, ri);
     }
 
+    /// The lamplighter's pole, with its little flame at the tip.
+    fn draw_pole(gl: &Gl, kit: &Kit, k: &Keeper) {
+        let (_, hand, tip) = World::keeper_pose(k);
+        let pd = tip - hand;
+        gl.part(
+            kit.tube,
+            place(hand - pd * 0.15, pd, k.face, v3(0.008, pd.len() * 1.15, 0.008)),
+            rgb(0x8A5A3B),
+            0.0,
+            Ink::Radial,
+        );
+    }
+
     /// The rose's glass globe; after everything solid.
     pub fn draw_glass(&self, gl: &Gl, kit: &Kit) {
         if let Some(r) = &self.rose {
@@ -2102,6 +2428,13 @@ impl World {
         if !self.cinders.is_empty() {
             Sprites::begin(gl.sprite);
             trouble::draw_cinder_shadows(&self.cinders, &move |n| ground_r(kind, n));
+            Sprites::end();
+        }
+        if !self.devils.is_empty() {
+            Sprites::begin(gl.sprite);
+            for d in &self.devils {
+                d.draw(cam, &move |n| ground_r(kind, n));
+            }
             Sprites::end();
         }
         if self.butterflies.is_empty() {
@@ -2139,6 +2472,9 @@ impl World {
         let ground = move |n: V3| ground_r(kind, n);
         self.dust.draw_glow(s, t, &ground);
         trouble::draw_cinder_glow(&self.cinders, s, t, &ground);
+        for q in &self.plane_parts {
+            q.draw_glint(s, &ground, t);
+        }
         if let Some(r) = &self.rose {
             let k = 0.5 + 0.5 * (t * 2.0).sin();
             s.billboard(
@@ -2441,7 +2777,7 @@ mod tests {
         let mut fx = Fx::new();
         let mut snd = Sounds::new(false);
         for _ in 0..(20 * 60) {
-            fox.update(1.0 / 60.0, &player, &mut fx, &mut snd);
+            fox.update(1.0 / 60.0, &player, None, &mut fx, &mut snd);
         }
         assert_eq!(fox.trust, FOX_TRUST);
     }

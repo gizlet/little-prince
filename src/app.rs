@@ -7,7 +7,7 @@ use crate::book;
 use crate::dialog::{Dialog, Finish};
 use crate::fx::{Burst, Fx};
 use crate::gl::{self, lighten, mix, rgb, rgba, Gl, Ink, Lighting, Post, Sprites};
-use crate::hero::{Hero, Motion};
+use crate::hero::{Hero, Motion, Names};
 use crate::input::{Button, Controls};
 use crate::math::{any_perp, approach3, clamp01, place, smooth, v3, Rng, V3};
 use crate::menu::{Action, Keys, Menu, Page, Setting};
@@ -38,6 +38,48 @@ const PITCH_MAX: f32 = 1.2;
 /// The default hero model and its height in world units.
 const HERO: &str = "little-prince";
 pub const HERO_H: f32 = 0.42;
+/// How tall the lamplighter and the fox are drawn.
+const KEEPER_H: f32 = 0.6;
+const FOX_H: f32 = 0.24;
+
+/// The lamplighter's and the fox's animations (see `scripts/npc.py`).
+const KEEPER: Names = Names {
+    idle: &["Idle"],
+    walk: &["Walk"],
+    run: &["Run"],
+    jump: &["Idle"],
+    land: &["Idle"],
+    cheer: &["Light"],
+    walk_stride: 1.0,
+    run_stride: 2.0,
+};
+const FOX: Names = Names {
+    idle: &["Idle"],
+    walk: &["Walk"],
+    run: &["Run"],
+    jump: &["Run"],
+    land: &["Idle"],
+    cheer: &["Look"],
+    walk_stride: 1.6,
+    run_stride: 4.0,
+};
+
+/// The lamplighter and the fox, from Quaternius's CC0 models; when a model
+/// is missing the planet builds its character from shapes instead.
+pub struct Cast {
+    pub keeper: Option<Hero>,
+    pub fox: Option<Hero>,
+}
+
+impl Cast {
+    fn load() -> Cast {
+        let dir = crate::hero::assets_dir().join("npc");
+        Cast {
+            keeper: Hero::load_from(&dir.join("lamplighter.glb"), "lamplighter", &KEEPER),
+            fox: Hero::load_from(&dir.join("fox.glb"), "fox", &FOX),
+        }
+    }
+}
 /// Seconds on the title before autoplay starts by itself.
 const IDLE_AUTOPLAY: f32 = 12.0;
 /// Seconds autoplay spends on each planet.
@@ -128,6 +170,7 @@ pub struct App {
     pub book: book::State,
     /// Seconds left of being knocked off balance by a trouble.
     stun: f32,
+    pub cast: Cast,
 }
 
 /// How near a character the traveller must be to talk to it.
@@ -162,7 +205,15 @@ impl App {
         let mut snd = Sounds::new(audio);
         snd.volume = settings.volume as f32 / 10.0;
         let journeys = std::array::from_fn(|i| store.slot(i));
-        let worlds: Vec<World> = KINDS.iter().map(|&k| World::new(k)).collect();
+        let mut worlds: Vec<World> = KINDS.iter().map(|&k| World::new(k)).collect();
+        let cast = Cast::load();
+        for w in &mut worlds {
+            w.models = match w.kind {
+                Kind::Lamp => cast.keeper.is_some(),
+                Kind::Desert => cast.fox.is_some(),
+                Kind::B612 => false,
+            };
+        }
         let w = &worlds[0];
         let mut player = Player::new(w.spawn, w.surface(w.spawn));
         player.teleport(w.spawn, any_perp(w.spawn), w.surface(w.spawn), 0.0);
@@ -217,6 +268,7 @@ impl App {
             assist: false,
             book: book::State::default(),
             stun: 0.0,
+            cast,
         }
     }
 
@@ -230,6 +282,9 @@ impl App {
             "menu" => self.menu.as_ref().map_or("none".into(), |m| format!("{:?}", m.top().0).to_lowercase()),
             "row" => self.menu.as_ref().map_or(0, |m| m.top().1).to_string(),
             "stardust" => self.journey.stardust.to_string(),
+            "moths" => self.world().moths_coming().to_string(),
+            "storm" => ((self.world().storm > 0.5) as u8).to_string(),
+            "found" => self.world().found().to_string(),
             "crawling" => self.world().crawling().to_string(),
             "sprouts-now" => self.world().sprout_count().to_string(),
             "troubles" => self.journey.stats.troubles.to_string(),
@@ -311,8 +366,10 @@ impl App {
         for (i, w) in self.worlds.iter().enumerate() {
             self.journey.scores[i] = w.score;
             self.journey.parts[i] = w.parts;
-            if w.kind == Kind::B612 {
-                self.journey.swept = Some(w.swept());
+            match w.kind {
+                Kind::B612 => self.journey.swept = Some(w.swept()),
+                Kind::Desert => self.journey.found = Some(w.found()),
+                Kind::Lamp => {}
             }
         }
         let ok = self.store.save_journey(slot, &self.journey);
@@ -443,8 +500,12 @@ impl App {
             }
         };
         for (w, parts) in self.worlds.iter_mut().zip(j.parts) {
-            let swept = if w.kind == Kind::B612 { j.swept } else { None };
-            w.restore(parts, swept);
+            let marks = match w.kind {
+                Kind::B612 => j.swept,
+                Kind::Desert => j.found,
+                Kind::Lamp => None,
+            };
+            w.restore(parts, marks);
         }
         self.menu = None;
         self.autoplay = false;
@@ -748,6 +809,11 @@ impl App {
             jump = false;
         }
 
+        // The sandstorm's wind leans on him, though never so hard he cannot
+        // stand still for the fox.
+        if self.mode == Mode::Play {
+            wish += self.world().storm_push(self.player.n);
+        }
         if self.stun > 0.0 {
             self.stun -= dt;
             wish = V3::ZERO;
@@ -796,6 +862,7 @@ impl App {
             landed,
         };
         let scored = self.worlds[self.cur].update(dt, t, &ps, &mut self.fx, &mut self.snd);
+        self.update_cast(dt);
         if scored {
             self.player.cheer = 1.0;
         }
@@ -815,6 +882,40 @@ impl App {
         }
         self.fx.update(dt);
         self.update_camera(dt);
+    }
+
+    /// Moves the planet's character drawn from a model, and hands the
+    /// lamplighter's pole to his model's hand.
+    fn update_cast(&mut self, dt: f32) {
+        let w = &self.worlds[self.cur];
+        let (actor, model, h) = match w.kind {
+            Kind::Lamp => (w.keeper_actor(), self.cast.keeper.as_mut(), KEEPER_H),
+            Kind::Desert => (w.fox_actor(), self.cast.fox.as_mut(), FOX_H),
+            Kind::B612 => return,
+        };
+        let (Some(a), Some(m)) = (actor, model) else { return };
+        m.drawn = h;
+        let busy = if a.busy { 1.0 } else { 0.0 };
+        m.update(dt, &Motion { speed: a.speed, grounded: true, flying: false, cheer: busy });
+        let hand = m.joint("Wrist.R", &a.frame, h);
+        if self.worlds[self.cur].kind == Kind::Lamp {
+            self.worlds[self.cur].set_keeper_hand(hand);
+        }
+    }
+
+    /// Draws the planet's character drawn from a model.
+    fn draw_cast(&self, g: &Gl) {
+        let w = self.world();
+        let (actor, model, h) = match w.kind {
+            Kind::Lamp => (w.keeper_actor(), self.cast.keeper.as_ref(), KEEPER_H),
+            Kind::Desert => (w.fox_actor(), self.cast.fox.as_ref(), FOX_H),
+            Kind::B612 => return,
+        };
+        if let (Some(a), Some(m)) = (actor, model) {
+            if (a.frame.o - self.cam.pos).len() < 16.0 {
+                m.draw(g, &a.frame, h);
+            }
+        }
     }
 
     /// What the planet's troubles did this frame: stardust gathered,
@@ -1083,7 +1184,11 @@ impl App {
             Kind::Desert => (7.0, 22.0),
             Kind::Lamp => (6.0, 20.0),
         };
+        // A sandstorm closes the view in.
+        let storm = w.storm;
+        let (near, far) = (near * (1.0 - 0.75 * storm), far * (1.0 - 0.6 * storm));
         let fog = (near + lift, far + lift * 2.0);
+        let sand = rgb(0xD9A86C);
         let sky_d = w.sky_distance(self.cam.pos);
         let light = Lighting {
             sun: sky.sun,
@@ -1091,7 +1196,7 @@ impl App {
             shade: sky.shade,
             sky: sky.amb,
             rim: sky.rim,
-            fog: sky.fog,
+            fog: mix(sky.fog, sand, storm * 0.75),
             fog_range: fog,
             cam: self.cam.pos,
             pusher: self.player.feet(),
@@ -1099,8 +1204,8 @@ impl App {
             lamp,
             lamp_col: gl::scale(rgb(0xFFB45C), lamp_on * 1.4),
         };
-        let top = mix(sky.top, rgb(0x070A22), warp);
-        let bottom = mix(sky.bottom, rgb(0x1A1640), warp);
+        let top = mix(mix(sky.top, sand, storm * 0.6), rgb(0x070A22), warp);
+        let bottom = mix(mix(sky.bottom, sand, storm * 0.85), rgb(0x1A1640), warp);
         let g = &self.gl;
         g.ink.set(sky.ink);
         g.hero_ink.set(self.fx_level >= 2);
@@ -1133,6 +1238,7 @@ impl App {
             Some(h) => h.draw(g, &self.player.pose_frame(), HERO_H),
             None => self.player.draw(g, &self.kit, t),
         }
+        self.draw_cast(g);
         self.draw_birds(g);
         crate::prof::mark("cpu-parts");
         g.flush();
