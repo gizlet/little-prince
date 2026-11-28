@@ -9,6 +9,7 @@
 //! as blue ink sketches before that. While the book fills the screen the
 //! scene behind it is not drawn at all.
 
+use crate::achieve;
 use crate::app::{App, Mode};
 use crate::gl::{mix, rgb, rgba, Lighting};
 use crate::hud::{clock, rrect, wrap};
@@ -49,7 +50,7 @@ const TURN: f32 = 0.5;
 
 /// Whether a menu page is one of the book's.
 pub fn is_book(p: Page) -> bool {
-    matches!(p, Page::Journeys | Page::StarMap | Page::Chapter)
+    matches!(p, Page::Journeys | Page::StarMap | Page::Chapter | Page::Journal)
 }
 
 /// Which spread the book is open at and how far it has opened and turned.
@@ -151,6 +152,7 @@ fn wanted(app: &App) -> Vec<Want> {
         },
         Some((Page::StarMap, _)) => (0..3).map(|p| Want { planet: p, colour: seen(p), size: 150.0 }).collect(),
         Some((Page::Chapter, p)) => vec![Want { planet: p, colour: seen(p), size: 230.0 }],
+        Some((Page::Journal, _)) => (0..3).map(|p| Want { planet: p, colour: seen(p), size: 64.0 }).collect(),
         _ if app.mode == Mode::Title => vec![Want { planet: 0, colour: true, size: 128.0 }],
         _ => Vec::new(),
     }
@@ -390,6 +392,7 @@ pub fn draw(app: &App) {
         let tiles = &res.tiles;
         match page {
             Page::Journeys => journeys(app, row, a, tiles, m.confirm.is_some()),
+            Page::Journal => journal(app, a, tiles),
             Page::StarMap => chart(app, row, a, tiles),
             _ => chapter(app, row, a, tiles),
         }
@@ -634,6 +637,51 @@ fn chapter(app: &App, p: usize, a: f32, tiles: &[RenderTexture2D]) {
     }
     let hint = [format!("←→ {}", s(T::TurnPage, l)), format!("B {}", s(T::BackToChart, l))];
     foot(f, &hint.join("    "), FADED, a);
+}
+
+/// The journal: on the left the three planets as the prince left them, on
+/// the right the achievements, earned in gold and the rest as hints.
+fn journal(app: &App, a: f32, tiles: &[RenderTexture2D]) {
+    let f = &app.fonts;
+    let l = app.lang;
+    let j = &app.journey;
+    heading(f, l, LEFT, 40.0, T::Journal, T::JournalSub, 250.0, a);
+    let notes = [T::NoteB612, T::NoteLamp, T::NoteDesert];
+    for p in 0..3 {
+        let y = 140.0 + p as f32 * 90.0;
+        if let Some(t) = tiles.get(p) {
+            tile(*t, 76.0, y + 30.0, 64.0, a);
+        }
+        let name = s(PLANETS[p], l);
+        let size = fit(f, name, 13.0, 180.0, Weight::Text);
+        f.text(name, 116.0, y, size, rgba(INK, a), Align::Left);
+        let (note, col) = if j.done[p] {
+            (notes[p], INK)
+        } else if j.visited[p] {
+            (T::NoteWaiting, FADED)
+        } else {
+            (T::Unvisited, FADED)
+        };
+        for (k, line) in wrap(f, s(note, l), 11.0, 180.0).iter().take(3).enumerate() {
+            f.text(line, 116.0, y + 20.0 + k as f32 * 15.0, 11.0, rgba(col, a), Align::Left);
+        }
+    }
+    if j.finished {
+        f.text(s(T::FreePlay, l), LEFT, 408.0, 11.0, rgba(GOLD, a), Align::Center);
+    }
+    let title = format!("{} {}/{}", s(T::Achievements, l), j.achievements.count_ones(), achieve::ALL.len());
+    f.text(&title, RIGHT, 44.0, 20.0, rgba(INK, a), Align::Center);
+    divider(RIGHT, 78.0, a);
+    for (i, ach) in achieve::ALL.iter().enumerate() {
+        let y = 92.0 + i as f32 * 26.0;
+        let earned = j.achievements & 1 << i != 0;
+        let star_col = if earned { rgba(GOLD, a) } else { rgba(FADED, 0.3 * a) };
+        star(346.0, y + 8.0, 7.0, star_col);
+        let (text, size, col) = if earned { (s(ach.name, l), 13.0, INK) } else { (s(ach.hint, l), 11.0, FADED) };
+        let size = fit(f, text, size, 250.0, Weight::Text);
+        f.text(text, 360.0, y + (13.0 - size) * 0.5, size, rgba(col, a), Align::Left);
+    }
+    foot(f, &format!("B {}", s(T::GoBack, l)), FADED, a);
 }
 
 /// The closed book on the title, floating and turning a little.

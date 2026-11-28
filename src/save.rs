@@ -73,6 +73,11 @@ pub struct Journey {
     pub found: Option<u8>,
     /// Stardust carried.
     pub stardust: u32,
+    /// Whether the story is over: the prince came home for the ending, and
+    /// every route stays open.
+    pub finished: bool,
+    /// Achievements earned, bit `i` for `achieve::ALL[i]`; saved by name.
+    pub achievements: u32,
     pub stats: Stats,
     /// Lines this version does not understand, kept as they were.
     extra: Vec<String>,
@@ -124,6 +129,19 @@ impl Journey {
                 "troubles" => v.parse().map(|x| j.stats.troubles = x).is_ok(),
                 "bumps" => v.parse().map(|x| j.stats.bumps = x).is_ok(),
                 "stardust" => v.parse().map(|x| j.stardust = x).is_ok(),
+                "finished" => {
+                    j.finished = v == "1";
+                    true
+                }
+                // Names this version does not know are dropped.
+                "achievements" => {
+                    for name in v.split_whitespace() {
+                        if let Some(i) = crate::achieve::index(name) {
+                            j.achievements |= 1 << i;
+                        }
+                    }
+                    true
+                }
                 "found" => {
                     let list: Option<Vec<u8>> =
                         v.split_whitespace().map(|x| x.parse().ok().filter(|i: &u8| *i < 8)).collect();
@@ -176,6 +194,14 @@ impl Journey {
             out += &format!("{p}.score {score}\n{p}.parts {} {} {}\n", parts[0], parts[1], parts[2]);
         }
         out += &format!("stardust {}\ntroubles {}\nbumps {}\n", self.stardust, s.troubles, s.bumps);
+        out += &format!("finished {}\n", self.finished as u8);
+        let earned: Vec<&str> = crate::achieve::ALL
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| self.achievements & 1 << i != 0)
+            .map(|(_, a)| a.key)
+            .collect();
+        out += &format!("achievements {}\n", earned.join(" "));
         if let Some(found) = self.found {
             let list: Vec<String> = (0..8).filter(|i| found & 1 << i != 0).map(|i| i.to_string()).collect();
             out += &format!("found {}\n", list.join(" "));
@@ -395,6 +421,8 @@ mod tests {
         j.stardust = 17;
         j.swept = Some(0b10);
         j.found = Some(0b1001);
+        j.finished = true;
+        j.achievements = 0b100011;
         j.stats = Stats {
             time: 321.5,
             distance: 1234.5,

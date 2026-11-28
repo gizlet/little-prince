@@ -3,6 +3,7 @@
 //! autopilot, and turning the prince's steps, jumps and landings into dust,
 //! rings and sound.
 
+use crate::achieve;
 use crate::book;
 use crate::dialog::{Dialog, Finish};
 use crate::fx::{Burst, Fx};
@@ -38,6 +39,8 @@ const PITCH_MAX: f32 = 1.2;
 /// The default hero model and its height in world units.
 const HERO: &str = "little-prince";
 pub const HERO_H: f32 = 0.42;
+/// Seconds the ending lasts.
+pub const ENDING: f32 = 24.0;
 /// How tall the lamplighter and the fox are drawn.
 const KEEPER_H: f32 = 0.6;
 const FOX_H: f32 = 0.24;
@@ -171,6 +174,14 @@ pub struct App {
     /// Seconds left of being knocked off balance by a trouble.
     stun: f32,
     pub cast: Cast,
+    /// Seconds into the ending, while it plays.
+    pub ending: Option<f32>,
+    /// Achievements just earned, shown one after another, and seconds the
+    /// first has shown.
+    pub toasts: Vec<usize>,
+    pub toast_t: f32,
+    /// Seconds since the ending finished, for the free play banner.
+    pub free_t: f32,
 }
 
 /// How near a character the traveller must be to talk to it.
@@ -271,6 +282,10 @@ impl App {
             book: book::State::default(),
             stun: 0.0,
             cast,
+            ending: None,
+            toasts: Vec::new(),
+            toast_t: 0.0,
+            free_t: 99.0,
         }
     }
 
@@ -284,6 +299,9 @@ impl App {
             "menu" => self.menu.as_ref().map_or("none".into(), |m| format!("{:?}", m.top().0).to_lowercase()),
             "row" => self.menu.as_ref().map_or(0, |m| m.top().1).to_string(),
             "stardust" => self.journey.stardust.to_string(),
+            "finished" => (self.journey.finished as u8).to_string(),
+            "achievements" => self.journey.achievements.count_ones().to_string(),
+            "ending" => (self.ending.is_some() as u8).to_string(),
             "moths" => self.world().moths_coming().to_string(),
             "storm" => ((self.world().storm > 0.5) as u8).to_string(),
             "found" => self.world().found().to_string(),
@@ -342,6 +360,8 @@ impl App {
                         (Some(j), "flights") => j.stats.flights.to_string(),
                         (Some(j), "time") => format!("{:.2}", j.stats.time),
                         (Some(j), "distance") => format!("{:.2}", j.stats.distance),
+                        (Some(j), "finished") => (j.finished as u8).to_string(),
+                        (Some(j), "achievements") => j.achievements.count_ones().to_string(),
                         (Some(j), "visited") => j.visited.iter().filter(|v| **v).count().to_string(),
                         (Some(j), k) => match k.strip_prefix("score.").and_then(planet) {
                             Some(p) => j.scores[p].to_string(),
@@ -407,7 +427,13 @@ impl App {
     /// Whether the birds can take the traveller to planet `p`: B612, any
     /// planet visited before, or the next one once a task is done.
     pub fn route_open(&self, p: usize) -> bool {
-        p == 0 || self.journey.visited[p] || self.journey.done[p - 1]
+        p == 0 || self.journey.finished || self.journey.visited[p] || self.journey.done[p - 1]
+    }
+
+    /// Whether talking to the rose now begins the ending: every task is
+    /// done and the story is not over yet.
+    fn homecoming(&self) -> bool {
+        self.cur == 0 && self.journey.done.iter().all(|d| *d) && !self.journey.finished
     }
 
     /// Whether the planet's character is near enough to talk to.
@@ -424,7 +450,12 @@ impl App {
     fn talk(&mut self) {
         let p = self.cur;
         let w = self.world();
-        self.dialog = Some(Dialog::with(w.kind, p, self.journey.done[p], w.ready()));
+        let d = if self.homecoming() {
+            Dialog::homecoming()
+        } else {
+            Dialog::with(w.kind, p, self.journey.done[p], w.ready())
+        };
+        self.dialog = Some(d);
         self.snd.play(Sfx::Chime(4), 1.0, 0.35);
     }
 
@@ -436,8 +467,13 @@ impl App {
         if d.press(lang) {
             let finish = d.finish;
             self.dialog = None;
-            if let Finish::Complete(p) = finish {
-                self.complete(p);
+            match finish {
+                Finish::Complete(p) => self.complete(p),
+                Finish::Ending => {
+                    self.ending = Some(0.0);
+                    self.snd.play(Sfx::Chime(3), 0.8, 0.45);
+                }
+                Finish::Nothing => {}
             }
         }
     }
@@ -460,6 +496,16 @@ impl App {
     fn assist_step(&mut self, dt: f32) -> (V3, bool) {
         let p = self.cur;
         let w = self.world();
+        if self.homecoming() {
+            if let Some(s) = w.speaker() {
+                let to = (s - self.player.feet()).flatten(self.player.n);
+                if to.len() < TALK * 0.75 {
+                    self.talk();
+                    return (V3::ZERO, false);
+                }
+                return (to.norm(), false);
+            }
+        }
         if self.journey.done[p] {
             // Back beside the character after a trouble knocked him away.
             let to = w.speaker().map_or(V3::ZERO, |s| (s - self.player.feet()).flatten(self.player.n));
@@ -515,6 +561,9 @@ impl App {
         self.menu = None;
         self.autoplay = false;
         self.dialog = None;
+        self.ending = None;
+        self.toasts.clear();
+        self.free_t = 99.0;
         self.slot = Some(slot);
         self.settings.slot = slot;
         self.store.save_settings(&self.settings);
@@ -741,8 +790,10 @@ impl App {
             match self.mode {
                 Mode::Title if c.pressed(Button::Start) => self.open_menu(Page::Settings),
                 Mode::Title if c.pressed(Button::A) => self.open_menu(Page::Journeys),
+                // The ending plays through without menus.
+                Mode::Play if self.ending.is_some() => {}
                 Mode::Play if !self.autoplay && c.pressed(Button::Start) => self.open_menu(Page::Pause),
-                Mode::Play if !self.autoplay && c.pressed(Button::Select) => self.open_menu(Page::Statistics),
+                Mode::Play if !self.autoplay && c.pressed(Button::Select) => self.open_menu(Page::Journal),
                 Mode::Play if !self.autoplay && self.dialog.is_none() && c.pressed(Button::X) => {
                     self.open_menu(Page::StarMap)
                 }
@@ -773,7 +824,9 @@ impl App {
                 }
             }
             Mode::Play => {
-                if self.autoplay {
+                if self.ending.is_some() {
+                    self.update_ending(dt, input && c.pressed(Button::A));
+                } else if self.autoplay {
                     (wish, jump) = self.autopilot(dt);
                     if self.planet_t > AUTOPLAY_STAY {
                         self.begin_flight((self.cur + 1) % self.worlds.len());
@@ -872,6 +925,7 @@ impl App {
             self.player.cheer = 1.0;
         }
         self.troubles();
+        self.achievements(dt);
         // Sunsets wherever the prince stands, on any planet.
         let e = self.player.n.dot(self.world().sun(t));
         let sunset = self.mode == Mode::Play && self.sun_e > 0.0 && e <= 0.0;
@@ -923,6 +977,55 @@ impl App {
         }
     }
 
+    /// The ending: the planet turns quickly to its sunset while the camera
+    /// circles the prince and the rose and the closing lines show; then the
+    /// story is over and every route stays open. A after a few seconds ends
+    /// it sooner.
+    fn update_ending(&mut self, dt: f32, skip: bool) {
+        let Some(e) = self.ending.as_mut() else { return };
+        *e += dt;
+        let e = *e;
+        let n = self.player.n;
+        // Fast until the sun touches the horizon, then at its own pace.
+        if e < 16.0 && n.dot(self.world().sun(self.t)) > 0.02 {
+            self.t += dt * 14.0;
+        }
+        self.cam_fwd = self.cam_fwd.rotate(n, dt * 0.18).flatten(n).norm();
+        if e >= ENDING || (skip && e > 4.0) {
+            self.ending = None;
+            self.journey.finished = true;
+            self.free_t = 0.0;
+            self.player.cheer = 1.0;
+            self.snd.play(Sfx::Chime(7), 0.8, 0.5);
+            self.save_now();
+        }
+    }
+
+    /// Marks achievements the journey has just earned and shows them one
+    /// after another.
+    fn achievements(&mut self, dt: f32) {
+        self.free_t += dt;
+        if self.counting() {
+            for (i, w) in self.worlds.iter().enumerate() {
+                self.journey.scores[i] = w.score;
+                self.journey.parts[i] = w.parts;
+            }
+            let new = achieve::check(&mut self.journey);
+            if !new.is_empty() {
+                self.snd.play(Sfx::Chime(6), 0.9, 0.4);
+                self.toasts.extend(new);
+                self.save_now();
+            }
+        }
+        if !self.toasts.is_empty() {
+            self.toast_t += dt;
+            if self.toast_t > 3.6 {
+                self.toasts.remove(0);
+                self.toast_t = 0.0;
+            }
+        }
+    }
+
     /// What the planet's troubles did this frame: stardust gathered,
     /// troubles seen to, and a knock that spills stardust.
     fn troubles(&mut self) {
@@ -933,7 +1036,8 @@ impl App {
             self.journey.stardust += gathered;
             self.journey.stats.troubles += handled;
         }
-        let Some(from) = bump else { return };
+        // Nothing knocks him over during the ending.
+        let Some(from) = bump.filter(|_| self.ending.is_none()) else { return };
         self.player.knock(from);
         self.stun = 0.45;
         self.fx.shake = self.fx.shake.max(0.35);

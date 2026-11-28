@@ -68,8 +68,8 @@ actions = { zh-CN = "暂停菜单：设置、统计、存档" }
 
 [[controls]]
 button = "select"
-action = "Statistics"
-actions = { zh-CN = "统计" }
+action = "Journal: the planets and achievements"
+actions = { zh-CN = "游记：星球与成就" }
 
 [[packages]]
 target = "aarch64-unknown-linux-gnu"

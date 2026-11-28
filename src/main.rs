@@ -28,6 +28,7 @@
 // A release build on Windows is a windowed program, with no console of its own.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod achieve;
 mod app;
 mod book;
 mod dialog;
@@ -368,6 +369,35 @@ fn setup_capture(app: &mut App, c: &input::Controls) {
             step(app, 0.5);
             app.worlds[2].skip_to_storm();
             step(app, at.min(6.0));
+        }
+        "journal" | "ending" => {
+            // Journey 1 on B612, two tasks done for the journal; all three
+            // and the ending under way for the ending.
+            app.autoplay = true;
+            app.start_play(0);
+            step(app, 2.0);
+            app.autoplay = false;
+            app.slot = Some(0);
+            app.journey.visited = [true; 3];
+            app.journey.stats = save::Stats {
+                time: 2710.0,
+                distance: 820.0,
+                jumps: 64,
+                sunsets: 31,
+                sprouts: 14,
+                flights: 5,
+                troubles: 12,
+                bumps: 4,
+            };
+            if scene == "journal" {
+                app.journey.done = [true, true, false];
+                app.journey.achievements = 0b0000_0100_0111;
+                app.menu = Some(menu::Menu::open(menu::Page::Journal, 0));
+            } else {
+                app.journey.done = [true; 3];
+                app.ending = Some(0.0);
+                step(app, at);
+            }
         }
         "keeper" | "foxclose" => {
             // The prince a few steps from the lamplighter or the fox,

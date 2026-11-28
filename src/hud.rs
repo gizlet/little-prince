@@ -2,6 +2,7 @@
 //! with the source credits, planet banners, the score, the prompt bar and the
 //! performance panel (FPS with a frame-time graph, CPU, memory, temperature).
 
+use crate::achieve;
 use crate::app::{App, Mode};
 use crate::book;
 use crate::dialog::Dialog;
@@ -133,7 +134,8 @@ pub fn draw(app: &App) {
         }
     }
     crate::prof::mark("hud-live");
-    if !crate::prof::skip("hudcache") && !covered {
+    // The ending hides the prompt bar and the panel too.
+    if !crate::prof::skip("hudcache") && !covered && app.ending.is_none() {
         blit_cache();
     }
     if let Some(m) = &app.menu {
@@ -195,6 +197,10 @@ fn play(app: &App) {
     let l = app.lang;
     let w = app.world();
     let (name, hint, _) = w.name();
+    if app.ending.is_some() {
+        ending(app);
+        return;
+    }
 
     let bt = app.planet_t;
     if app.mode == Mode::Play && bt < 5.5 {
@@ -242,9 +248,51 @@ fn play(app: &App) {
         }
         f.middle(&text, 622.0, 53.0, 13.0, CREAM, Align::Right, Weight::Text);
     }
+    if app.journey.finished && app.free_t < 7.0 {
+        let a = smooth(app.free_t / 0.6) * (1.0 - smooth((app.free_t - 6.0) / 1.0));
+        f.shadowed(s(T::FreePlay, l), 320.0, 150.0, 16.0, rgba(GOLD, a), Align::Center, Weight::Text);
+    }
+    if let Some(&i) = app.toasts.first() {
+        let t = app.toast_t;
+        let a = smooth(t / 0.3) * (1.0 - smooth((t - 3.0) / 0.5));
+        let text = format!("{} · {}", s(T::AchievementGot, l), s(achieve::ALL[i].name, l));
+        let w = f.measure(&text, 13.0, Weight::Text) + 48.0;
+        let y = 72.0 - (1.0 - a) * 10.0;
+        rrect(320.0 - w / 2.0, y, w, 28.0, 14.0, rgba(PANEL, 0.8 * a));
+        unsafe {
+            ffi::DrawPoly(Vector2 { x: 320.0 - w / 2.0 + 18.0, y: y + 14.0 }, 5, 7.0, app.t * 60.0, rgba(GOLD, a));
+        }
+        f.middle(&text, 328.0, y + 14.0, 13.0, rgba(CREAM, a), Align::Center, Weight::Text);
+    }
     if app.mode == Mode::Fly {
         let a = smooth(app.mode_t / 0.5) * (1.0 - smooth((app.mode_t - 3.2) / 0.6));
         f.shadowed(s(T::Warping, l), 320.0, 404.0, 16.0, rgba(CREAM, a), Align::Center, Weight::Text);
+    }
+}
+
+/// The ending over the scene: dark bars at the top and bottom, and the
+/// closing lines one after another.
+fn ending(app: &App) {
+    let f = &app.fonts;
+    let l = app.lang;
+    let e = app.ending.unwrap_or(0.0);
+    let end = crate::app::ENDING;
+    let k = smooth(e / 2.0) * (1.0 - smooth((e - end + 2.0) / 2.0));
+    let bar = (56.0 * k) as i32;
+    unsafe {
+        ffi::DrawRectangle(0, 0, 640, bar, rgba(rgb(0x05060F), 0.92));
+        ffi::DrawRectangle(0, 480 - bar, 640, bar, rgba(rgb(0x05060F), 0.92));
+    }
+    let lines = [T::End1, T::End2, T::End3, T::End4];
+    for (i, t) in lines.iter().enumerate() {
+        let start = 3.0 + i as f32 * 4.5;
+        let out = if i + 1 == lines.len() { end - 3.0 } else { start + 3.6 };
+        let a = smooth((e - start) / 0.8) * (1.0 - smooth((e - out) / 0.8));
+        if a > 0.01 {
+            for (k, line) in wrap(f, s(*t, l), 16.0, 520.0).iter().enumerate() {
+                f.shadowed(line, 320.0, 372.0 + k as f32 * 24.0, 16.0, rgba(CREAM, a), Align::Center, Weight::Text);
+            }
+        }
     }
 }
 
@@ -260,7 +308,7 @@ fn bar(app: &App) {
         ("X", s(T::Travel, l)),
         (s(T::RStick, l), s(T::Camera, l)),
         ("Y", &effects),
-        ("Select", s(T::Statistics, l)),
+        ("Select", s(T::Journal, l)),
         ("Start", s(T::Menu, l)),
     ];
     let size = 11.0;
@@ -334,7 +382,7 @@ fn menu(app: &App, m: &Menu) {
     let key = |b: &str, t: T| format!("{b} {}", s(t, l));
     let (title, row_h, rows, hint): (T, f32, Vec<(String, String)>, String) = match page {
         // The book draws its own pages.
-        Page::Journeys | Page::StarMap | Page::Chapter => return,
+        Page::Journeys | Page::StarMap | Page::Chapter | Page::Journal => return,
         Page::Pause => {
             let rows = PAUSE
                 .iter()

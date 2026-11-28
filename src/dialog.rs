@@ -15,6 +15,8 @@ pub enum Finish {
     Nothing,
     /// Completes the task of planet `n`.
     Complete(usize),
+    /// Begins the ending.
+    Ending,
 }
 
 #[derive(Clone, Debug)]
@@ -46,6 +48,11 @@ impl Dialog {
             (intro.to_vec(), Finish::Nothing)
         };
         Dialog { speaker, lines, line: 0, shown: 0.0, finish }
+    }
+
+    /// The rose, when the prince comes home with every task done.
+    pub fn homecoming() -> Dialog {
+        Dialog { speaker: T::Rose, lines: vec![T::RoseEnd1, T::RoseEnd2], line: 0, shown: 0.0, finish: Finish::Ending }
     }
 
     pub fn update(&mut self, dt: f32) {
