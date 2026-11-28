@@ -319,3 +319,214 @@ pub fn draw_cinder_glow(cinders: &[Cinder], s: &Sprites, t: f32, ground: &dyn Fn
         s.billboard(p, 0.07, rgba(rgb(0xFFE6B0), 1.0));
     }
 }
+
+/// How fast a snuffer moth flies, in world units a second.
+const MOTH_SPEED: f32 = 0.6;
+
+/// A snuffer moth: it comes out at night and makes for the lamp, and puts
+/// it out if it gets there.
+pub struct Moth {
+    pub n: V3,
+    pub face: V3,
+    /// Height above the ground.
+    pub alt: f32,
+    phase: f32,
+    /// Seconds into flying off, once shooed, after snuffing or at dawn.
+    pub flee: Option<f32>,
+}
+
+impl Moth {
+    pub fn new(n: V3, toward: V3, phase: f32) -> Moth {
+        let face = (toward - n).flatten(n);
+        let face = if face.len() < 1e-4 { any_perp(n) } else { face.norm() };
+        Moth { n, face, alt: 0.55, phase, flee: None }
+    }
+
+    /// Out and flying at the lamp: one that can be shooed or bumped into.
+    pub fn coming(&self) -> bool {
+        self.flee.is_none()
+    }
+
+    /// Gone for good.
+    pub fn gone(&self) -> bool {
+        self.flee.is_some_and(|f| f > 1.6)
+    }
+
+    /// Flies towards the direction `lamp` on a planet of `radius`; returns
+    /// true when it has reached the lamp, `top` above the ground.
+    pub fn update(&mut self, dt: f32, lamp: V3, top: f32, radius: f32) -> bool {
+        self.phase += dt * 16.0;
+        if let Some(f) = &mut self.flee {
+            *f += dt;
+            self.alt += dt * 1.4;
+            let axis = self.n.cross(self.face).norm();
+            self.n = self.n.rotate(axis, MOTH_SPEED * 1.6 * dt / radius).norm();
+            return false;
+        }
+        let to = (lamp - self.n).flatten(self.n);
+        let dist = to.len() * radius;
+        if dist < 0.22 && self.alt > top - 0.2 {
+            return true;
+        }
+        let want = if to.len() < 1e-5 { self.face } else { to.norm() };
+        let a = self.face.cross(want).dot(self.n).atan2(self.face.dot(want));
+        let wobble = (self.phase * 0.13).sin() * 1.6;
+        self.face = self.face.rotate(self.n, (a * 2.5 + wobble) * dt).flatten(self.n).norm();
+        let axis = self.n.cross(self.face).norm();
+        self.n = self.n.rotate(axis, MOTH_SPEED * dt / radius).norm();
+        self.face = self.face.rotate(axis, MOTH_SPEED * dt / radius).flatten(self.n).norm();
+        // Rising towards the lamp's head as it comes near.
+        let want_alt = if dist < 1.6 { top } else { 0.55 };
+        self.alt += (want_alt - self.alt) * (1.0 - (-2.0 * dt).exp());
+        false
+    }
+
+    /// Where it is now, bobbing as it flutters.
+    pub fn pos(&self, ground: &dyn Fn(V3) -> f32) -> V3 {
+        self.n * (ground(self.n) + self.alt + (self.phase * 0.5).sin() * 0.03)
+    }
+
+    /// A grey body and two flapping wings.
+    pub fn draw(&self, gl: &Gl, kit: &Kit, ground: &dyn Fn(V3) -> f32) {
+        let p = self.pos(ground);
+        let (up, fwd) = (self.n, self.face);
+        let side = up.cross(fwd).norm();
+        let fade = 1.0 - self.flee.map_or(0.0, |f| (f / 1.6).min(1.0));
+        let s = 0.9 * fade + 0.1;
+        gl.part(kit.ball, place(p, up, fwd, v3(0.022, 0.022, 0.05) * s), rgb(0x5B5368), 0.0, Ink::Radial);
+        let flap = (self.phase).sin();
+        for sgn in [-1.0f32, 1.0] {
+            let wing = (side * sgn + up * (0.9 * flap)).norm();
+            let c = p + wing * (0.045 * s);
+            gl.part(
+                kit.ball,
+                place(c, wing.cross(fwd).norm() * -sgn, fwd, v3(0.05, 0.006, 0.035) * s),
+                rgb(0x9C93AE),
+                0.0,
+                Ink::None,
+            );
+        }
+    }
+}
+
+/// A little whirlwind of sand roaming the dunes in a sandstorm.
+pub struct Devil {
+    pub n: V3,
+    pub face: V3,
+    /// Seconds left before it blows itself out.
+    pub life: f32,
+    age: f32,
+    spin: f32,
+}
+
+/// How fast a dust devil drifts, in world units a second.
+const DEVIL_SPEED: f32 = 0.55;
+
+impl Devil {
+    pub fn new(n: V3, face: V3, life: f32) -> Devil {
+        Devil { n, face, life, age: 0.0, spin: 0.0 }
+    }
+
+    /// Drifts, bending towards `towards` (a direction), on a planet of `radius`.
+    pub fn update(&mut self, dt: f32, towards: V3, radius: f32) {
+        self.life -= dt;
+        self.age += dt;
+        self.spin += dt * 9.0;
+        let to = (towards - self.n).flatten(self.n);
+        if to.len() > 1e-4 {
+            let want = to.norm();
+            let a = self.face.cross(want).dot(self.n).atan2(self.face.dot(want));
+            self.face = self.face.rotate(self.n, (a * 0.6 + (self.spin * 0.07).sin() * 0.8) * dt).norm();
+        }
+        let axis = self.n.cross(self.face).norm();
+        self.n = self.n.rotate(axis, DEVIL_SPEED * dt / radius).norm();
+        self.face = self.face.rotate(axis, DEVIL_SPEED * dt / radius).flatten(self.n).norm();
+    }
+
+    /// How strong it is, rising when it forms and fading as it blows out.
+    pub fn strength(&self) -> f32 {
+        self.age.min(1.0) * (self.life / 1.5).clamp(0.0, 1.0)
+    }
+
+    /// A column of swirling sand (see-through, inside `Sprites::begin`),
+    /// facing the camera at `cam`.
+    pub fn draw(&self, cam: V3, ground: &dyn Fn(V3) -> f32) {
+        let k = self.strength();
+        if k <= 0.01 {
+            return;
+        }
+        let base = self.n * ground(self.n);
+        let up = self.n;
+        let right = (cam - base).cross(up).norm();
+        for i in 0..7 {
+            let h = i as f32 / 6.0;
+            let a = self.spin * (1.4 - h * 0.6) + i as f32 * 1.7;
+            let wide = 0.08 + h * 0.22;
+            let c = base + up * (0.08 + h * 0.75) + right * (a.sin() * wide * 0.5);
+            let size = 0.1 + h * 0.16;
+            Sprites::quad(c, right * size, up * (size * 0.6), rgba(rgb(0xD8B07A), 0.32 * k * (1.0 - h * 0.4)));
+        }
+    }
+}
+
+/// One of the lost aeroplane parts in the desert.
+pub struct PlanePart {
+    pub n: V3,
+    /// 0 a propeller blade, 1 a wheel, 2 the toolbox, 3 the fuel can.
+    pub shape: usize,
+    /// Under the sand until the fox shows where.
+    pub buried: bool,
+    pub found: bool,
+    /// Seconds since it was dug up, for its glint.
+    pub shown: f32,
+}
+
+impl PlanePart {
+    /// There to be picked up.
+    pub fn visible(&self) -> bool {
+        !self.found && (!self.buried || self.shown > 0.0)
+    }
+
+    pub fn draw(&self, gl: &Gl, kit: &Kit, ground: &dyn Fn(V3) -> f32, t: f32) {
+        if !self.visible() {
+            return;
+        }
+        let up = self.n;
+        let rise = (self.shown / 0.6).min(1.0);
+        let lift = if self.buried { -0.1 * (1.0 - rise) } else { 0.0 };
+        let at = up * (ground(up) + 0.04 + lift + (t * 2.0 + self.shape as f32).sin() * 0.01);
+        let fwd = any_perp(up).rotate(up, self.shape as f32 * 1.3);
+        let ri = Ink::Radial;
+        match self.shape {
+            0 => {
+                gl.part(kit.cube, place(at, up, fwd, v3(0.03, 0.012, 0.16)), rgb(0x8A5A3B), 0.0, ri);
+                gl.part(kit.ball, place(at, up, fwd, v3(0.035, 0.03, 0.035)), rgb(0xC9473E), 0.0, ri);
+            }
+            1 => {
+                let side = up.cross(fwd).norm();
+                let c = at + up * 0.07;
+                gl.part(kit.ball, place(c, side, up, v3(0.075, 0.03, 0.075)), rgb(0x3B3340), 0.0, ri);
+                gl.part(kit.ball, place(c, side, up, v3(0.03, 0.035, 0.03)), rgb(0xC9CFE0), 0.0, Ink::None);
+            }
+            2 => {
+                gl.part(kit.cube, place(at + up * 0.05, up, fwd, v3(0.09, 0.05, 0.05)), rgb(0xC9473E), 0.0, ri);
+                gl.part(kit.cube, place(at + up * 0.11, up, fwd, v3(0.04, 0.012, 0.01)), rgb(0x3B3340), 0.0, ri);
+            }
+            _ => {
+                gl.part(kit.tube, place(at, up, fwd, v3(0.05, 0.13, 0.05)), rgb(0x5E8A4A), 0.0, ri);
+                gl.part(kit.tube, place(at + up * 0.13, up, fwd, v3(0.015, 0.03, 0.015)), rgb(0x3B3340), 0.0, ri);
+            }
+        }
+    }
+
+    /// A glint over it, so it can be spotted through the dust (additive).
+    pub fn draw_glint(&self, s: &Sprites, ground: &dyn Fn(V3) -> f32, t: f32) {
+        if !self.visible() {
+            return;
+        }
+        let p = self.n * (ground(self.n) + 0.22);
+        let k = 0.5 + 0.5 * (t * 3.0 + self.shape as f32 * 1.7).sin();
+        s.billboard(p, 0.12 + 0.08 * k, rgba(rgb(0xFFE6A0), 0.35 + 0.4 * k));
+        s.billboard(p, 0.04, rgba(rgb(0xFFFFFF), 0.9));
+    }
+}

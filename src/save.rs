@@ -68,6 +68,9 @@ pub struct Journey {
     /// B612's active volcanoes swept, bit `i` for the `i`th; `None` in
     /// saves from before it was kept.
     pub swept: Option<u8>,
+    /// The desert's aeroplane parts found, bit `i` for the `i`th; `None` in
+    /// saves from before it was kept.
+    pub found: Option<u8>,
     /// Stardust carried.
     pub stardust: u32,
     pub stats: Stats,
@@ -121,6 +124,11 @@ impl Journey {
                 "troubles" => v.parse().map(|x| j.stats.troubles = x).is_ok(),
                 "bumps" => v.parse().map(|x| j.stats.bumps = x).is_ok(),
                 "stardust" => v.parse().map(|x| j.stardust = x).is_ok(),
+                "found" => {
+                    let list: Option<Vec<u8>> =
+                        v.split_whitespace().map(|x| x.parse().ok().filter(|i: &u8| *i < 8)).collect();
+                    list.map(|l| j.found = Some(l.iter().fold(0, |m, i| m | 1 << i))).is_some()
+                }
                 "swept" => {
                     let list: Option<Vec<u8>> =
                         v.split_whitespace().map(|x| x.parse().ok().filter(|i: &u8| *i < 8)).collect();
@@ -168,6 +176,10 @@ impl Journey {
             out += &format!("{p}.score {score}\n{p}.parts {} {} {}\n", parts[0], parts[1], parts[2]);
         }
         out += &format!("stardust {}\ntroubles {}\nbumps {}\n", self.stardust, s.troubles, s.bumps);
+        if let Some(found) = self.found {
+            let list: Vec<String> = (0..8).filter(|i| found & 1 << i != 0).map(|i| i.to_string()).collect();
+            out += &format!("found {}\n", list.join(" "));
+        }
         if let Some(swept) = self.swept {
             let list: Vec<String> = (0..8).filter(|i| swept & 1 << i != 0).map(|i| i.to_string()).collect();
             out += &format!("swept {}\n", list.join(" "));
@@ -382,6 +394,7 @@ mod tests {
         j.parts = [[3, 1, 1], [12, 0, 0], [0, 0, 0]];
         j.stardust = 17;
         j.swept = Some(0b10);
+        j.found = Some(0b1001);
         j.stats = Stats {
             time: 321.5,
             distance: 1234.5,

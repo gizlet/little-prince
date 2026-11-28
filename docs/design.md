@@ -22,9 +22,9 @@ it has bigger and gives each of them something to do.
 
 | Planet | Radius | Day | Main task | Trouble |
 | --- | --- | --- | --- | --- |
-| The lamplighter's | 15 | 14 s | Keep the night watch: light the small lamps before dusk and keep them lit until dawn | Snuffer moths that put lamps out after dark |
+| The lamplighter's | 15 | 14 s | Keep the night watch: three sunsets with the lamplighter, and six snuffer moths shooed from his lamp | Snuffer moths that put the lamp out after dark |
 | B612 | 18 | 240 s | Keep the planet: pull up baobab sprouts before they spread, keep caterpillars from the rose, sweep the volcanoes | Spreading sprouts, caterpillars, volcanoes that spit cinders when neglected |
-| The desert on Earth | 25 | 200 s | Find the aviator's lost parts between sandstorms and tame the fox, who then follows the traveller | Sandstorms that hide the way and push the traveller off course; a snake to keep away from |
+| The desert on Earth | 25 | 200 s | Tame the fox, who then follows the traveller and digs up buried parts; find the aviator's four lost parts between sandstorms | Sandstorms that hide the way and push the traveller off course, raising dust devils |
 
 The radii follow the book's order: the lamplighter's planet is the smallest,
 Earth by far the largest. A day is the time the sun takes to circle a planet;
@@ -122,6 +122,23 @@ seconds, to be gathered again.
   caterpillars crawl towards the rose: landing on one from a jump turns it
   into a butterfly, walking into one knocks the prince back. A new one comes
   forty-five seconds later, so the planet always needs some looking after.
+
+- **The lamplighter's planet.** At night two snuffer moths at a time
+  flutter towards the lamp. Landing near one, or jumping into it, shoos it
+  off as a firefly; one that reaches the lamp puts it out until the
+  lamplighter lights it again; walking into one knocks the prince back. The
+  task is three sunsets and six moths.
+- **The desert.** A sandstorm rises every 52 seconds and lasts about 20: the
+  fog closes in and turns to sand, the wind leans on the prince (never too
+  hard to stand still for the fox) and dust devils roam the dunes, knocking
+  him back. Two of the aviator's four parts lie in the open; the other two
+  are buried, and the fox, once tamed, trots to each in turn and digs it up.
+  The task is the fox's trust and the four parts; the save keeps which parts
+  were found.
+
+The lamplighter and the fox are Quaternius's CC0 "Worker" and "Fox",
+converted by `scripts/npc.py` and drawn with the hero's skinning; the
+lamplighter's pole follows his model's right wrist.
 
 Troubles add about 1,500 triangles a frame and no draw calls: the
 caterpillars are batched with the other small shapes, only their heads are

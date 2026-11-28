@@ -1,0 +1,14 @@
+The lamplighter and the fox (lamplighter.glb, fox.glb)
+
+By Quaternius (https://quaternius.com), from Poly Pizza:
+
+- fox.glb: "Fox", https://poly.pizza/m/Bc97C66HKi
+- lamplighter.glb: "Worker", https://poly.pizza/m/Yg2bQZO6Hj, recoloured
+  into the lamplighter's navy cap and blue coat
+
+Converted with scripts/npc.py (Blender 4.5): colours baked into one palette
+texture, the armature's rotation and scale applied, only the animations the
+game plays kept.
+
+Both are dedicated to the public domain under CC0 1.0 Universal:
+https://creativecommons.org/publicdomain/zero/1.0/

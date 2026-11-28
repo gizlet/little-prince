@@ -1,5 +1,6 @@
-# Reopened, B612's task is still done: the birds fly to the lamplighter,
-# and three sunsets and a word with him open the route to Earth.
+# Reopened, B612's task is still done: the birds fly to the lamplighter.
+# Three sunsets, six snuffer moths shooed from his lamp at night and a word
+# with him open the route to Earth.
 0.5 press a
 0.8 press a
 1.2 check done.b612 = 1
@@ -14,8 +15,11 @@
 2.9 check mode = fly
 8.0 check planet = lamp
 8.0 check mode = play
-8.2 assist 80
-80.0 check score.lamp = 3
-80.0 check done.lamp = 1
-80.0 check open.desert = 1
-80.5 quit
+8.2 assist 100
+105.0 check part.lamp.0 = 3        # sunsets
+105.0 check part.lamp.1 = 6        # moths shooed
+105.0 check score.lamp = 9
+105.0 check done.lamp = 1
+105.0 check open.desert = 1
+105.0 check saved.1.score.lamp = 9
+105.5 quit

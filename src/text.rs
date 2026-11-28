@@ -138,9 +138,11 @@ pub enum T {
     Caterpillars,
     Stardust,
     Troubles,
+    Moths,
+    PlaneParts,
 }
 
-const ALL: [T; 112] = [
+const ALL: [T; 114] = [
     T::Title,
     T::Subtitle,
     T::PressStart,
@@ -253,6 +255,8 @@ const ALL: [T; 112] = [
     T::Caterpillars,
     T::Stardust,
     T::Troubles,
+    T::Moths,
+    T::PlaneParts,
 ];
 
 pub fn s(t: T, l: Lang) -> &'static str {
@@ -268,9 +272,9 @@ pub fn s(t: T, l: Lang) -> &'static str {
         T::B612 => ("B612 · 小王子的星球", "B612 · The Prince's Planet"),
         T::B612Hint => ("拔掉蔓延的幼苗，扫扫火山，跳到毛毛虫身上让它变成蝴蝶，再去看看玫瑰", "Pull up the spreading sprouts, sweep the volcanoes, jump on the caterpillars to make butterflies of them, then visit the rose"),
         T::Lamp => ("点灯人的星球", "The Lamplighter's Planet"),
-        T::LampHint => ("陪点灯人看三次日落，再和他说说话", "Watch three sunsets with the lamplighter, then talk to him"),
+        T::LampHint => ("陪点灯人看三次日落，夜里赶走扑灯的熄灯虫", "Watch three sunsets with the lamplighter, and keep the snuffer moths from his lamp at night"),
         T::Desert => ("地球 · 沙漠", "Earth · The Desert"),
-        T::DesertHint => ("停下来，安静地等狐狸走近", "Stand still and let the fox come closer"),
+        T::DesertHint => ("安静地等狐狸走近，再在沙暴之间找回四个飞机零件", "Let the fox come closer, then find the four lost aeroplane parts between sandstorms"),
         T::Sprouts => ("幼苗", "Sprouts"),
         T::Sunsets => ("日落", "Sunsets"),
         T::Tamed => ("驯服", "Tamed"),
@@ -329,13 +333,13 @@ pub fn s(t: T, l: Lang) -> &'static str {
         T::RoseDone2 => ("去看看别的星星吧。候鸟会带你去点灯人那里。", "Go and see the other stars. The birds will take you to the lamplighter."),
         T::RoseIdle => ("别担心我，我有四根刺呢。", "Don't worry about me. I have my four thorns."),
         T::KeeperIntro1 => ("早上好……晚上好。这里转得太快，灯刚点上又该熄了。", "Good morning... good evening. This planet turns so fast, the lamp is barely lit before it must go out."),
-        T::KeeperIntro2 => ("陪我看三次日落吧。我一个人看，总是数不清。", "Watch three sunsets with me. On my own I always lose count."),
+        T::KeeperIntro2 => ("陪我看三次日落吧。夜里熄灯虫会来扑灯，跳到它们旁边就能把它们吓跑。", "Watch three sunsets with me. At night the snuffer moths come for the lamp; jump beside them and they fly off."),
         T::KeeperDone1 => ("三次日落，你一点也不嫌烦。你是第一个。", "Three sunsets, and you never once grew tired. You're the first."),
         T::KeeperDone2 => ("听说地球很大，那里的沙漠里住着一只狐狸。", "They say Earth is very big, and a fox lives in its desert."),
         T::KeeperIdle => ("该点灯了。再见……不，晚上好。", "Time to light the lamp. Goodbye... no, good evening."),
         T::FoxIntro1 => ("我还不能和你玩，我还没有被驯养。", "I can't play with you yet. I haven't been tamed."),
-        T::FoxIntro2 => ("每次都坐得近一点，什么也别说。慢慢来。", "Sit a little closer each time, and say nothing. Take your time."),
-        T::FoxDone1 => ("现在，在所有人里，我只认得你的脚步声了。", "Now, of everyone, yours are the only footsteps I know."),
+        T::FoxIntro2 => ("每次都坐得近一点，什么也别说。等我认得你了，我带你去找沙子里埋着的东西。", "Sit a little closer each time, and say nothing. Once I know you, I'll show you what the sand is hiding."),
+        T::FoxDone1 => ("你找回了飞行员的零件。现在，在所有人里，我只认得你的脚步声了。", "You found the aviator's parts. And of everyone, yours are now the only footsteps I know."),
         T::FoxDone2 => ("我跟你走。以后看见麦田，我就会想起你。", "I'll come with you. From now on, the wheat will remind me of you."),
         T::FoxIdle => ("走吧，我就在你身后。", "Go on. I'm right behind you."),
         T::StarMap => ("星图", "Star map"),
@@ -369,6 +373,8 @@ pub fn s(t: T, l: Lang) -> &'static str {
         T::Caterpillars => ("毛毛虫", "Caterpillars"),
         T::Stardust => ("星尘", "Stardust"),
         T::Troubles => ("处理的麻烦", "Troubles seen to"),
+        T::Moths => ("熄灯虫", "Snuffer moths"),
+        T::PlaneParts => ("飞机零件", "Aeroplane parts"),
     };
     match l {
         Lang::Zh => zh,

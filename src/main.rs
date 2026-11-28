@@ -349,6 +349,47 @@ fn setup_capture(app: &mut App, c: &input::Controls) {
             app.slot = Some(0);
             app.journey.stardust = 12;
         }
+        "watch" => {
+            // The lamplighter's planet at night, moths making for the lamp.
+            app.autoplay = true;
+            app.start_play(1);
+            step(app, at);
+            for _ in 0..40 * 60 {
+                if app.worlds[1].moths_coming() >= 2 {
+                    break;
+                }
+                step(app, 1.0 / 60.0);
+            }
+        }
+        "storm" => {
+            // The desert in a sandstorm.
+            app.autoplay = true;
+            app.start_play(2);
+            step(app, 0.5);
+            app.worlds[2].skip_to_storm();
+            step(app, at.min(6.0));
+        }
+        "keeper" | "foxclose" => {
+            // The prince a few steps from the lamplighter or the fox,
+            // facing them, for a close look at the character.
+            let idx = if scene == "keeper" { 1 } else { 2 };
+            app.start_play(idx);
+            step(app, 0.2);
+            if idx == 2 {
+                // Tamed, so it comes to his side.
+                app.worlds[2].restore([5, 0, 0], None);
+            }
+            let w = &app.worlds[idx];
+            if let Some(at) = w.speaker() {
+                let s = at.norm();
+                let toward = (w.spawn - s).flatten(s).norm();
+                let n = s.rotate(s.cross(toward).norm(), 1.3 / w.radius).norm();
+                let face = (s - n).flatten(n).norm();
+                let r = w.surface(n);
+                app.player.teleport(n, face, r, 0.0);
+            }
+            step(app, at.min(3.0));
+        }
         "b612" | "lamp" | "desert" | "fly" => {
             let idx = match scene.as_str() {
                 "lamp" => 1,
