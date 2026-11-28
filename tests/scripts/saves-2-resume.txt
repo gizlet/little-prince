@@ -24,7 +24,7 @@
 8.0 check saved.1.planet = b612
 8.0 check saved.1.visited = 1
 8.5 press select
-8.8 check menu = statistics
+8.8 check menu = journal    # Select opens the journal
 9.0 press b
 9.2 check menu = none
 9.4 quit

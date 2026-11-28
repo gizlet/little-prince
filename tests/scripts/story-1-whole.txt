@@ -1,0 +1,50 @@
+# The whole story on one new journey: B612, the lamplighter's planet and
+# the desert in turn, then home to the rose for the ending, and free play.
+0.5 press a
+0.8 press a                  # journey 1, new
+1.2 check slot = 1
+1.2 check finished = 0
+1.2 check open.desert = 0
+1.4 assist 100
+101.6 check done.b612 = 1
+101.8 press x
+102.2 check menu = starmap
+102.4 press right
+102.6 press a                # the lamplighter's chapter
+102.9 check menu = chapter
+103.1 press a
+103.4 check mode = fly
+109.5 check planet = lamp
+109.7 assist 100
+209.9 check done.lamp = 1
+210.1 press x
+210.5 check row = 1
+210.7 press right
+210.9 press a                # the desert's chapter
+211.2 check row = 2
+211.4 press a
+217.8 check planet = desert
+218.0 assist 90
+308.2 check done.desert = 1
+308.2 check finished = 0
+308.4 press select           # the journal
+308.8 check menu = journal
+309.0 press b
+309.3 check menu = none
+309.5 press x
+309.9 check row = 2
+310.1 press right            # round to B612
+310.3 press a
+310.6 check row = 0
+310.8 press a
+317.2 check planet = b612
+317.4 assist 70              # to the rose, the homecoming and the ending
+388.0 check ending = 0
+388.0 check finished = 1
+388.0 check open.desert = 1  # free play: every route open
+388.0 check achievements >= 6
+388.0 check saved.1.finished = 1
+388.0 check saved.1.achievements >= 6
+388.5 press select
+388.9 check menu = journal
+389.2 quit
