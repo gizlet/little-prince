@@ -46,9 +46,12 @@ planet cheap to draw.
 2. **Arrival, conversation, task.** Each planet has a character to talk to
    (the rose, the lamplighter, the fox and the aviator) and a main task. Side
    goals give stardust and achievements.
-3. **Ending.** With all three tasks done the birds carry the traveller home to
-   B612 for a gentle ending: the rose, a sunset, and the aviator looking up at
-   the stars on Earth. Afterwards the game continues in free play.
+3. **Ending.** With all three tasks done, talking to the rose on B612 begins
+   a gentle ending: she says two lines, the planet turns quickly to its
+   sunset while the camera circles, dark bars close in and four closing lines
+   follow one another (24 seconds; A after four seconds ends it sooner). The
+   journey is then marked finished and saved, and the game continues in free
+   play: every route stays open and the troubles go on.
 
 ## The prince
 
@@ -100,9 +103,34 @@ in one, half of walking.
 - Version 2 added each planet's task in parts (B612: sprouts, volcanoes,
   caterpillars), the stardust carried, troubles seen to and knock-backs; a
   version 1 journey's score becomes its first part.
-- A journal kept like the geographer's book: planets, characters and things
-  seen, statistics (sunsets watched, sprouts pulled, distance walked, play
-  time) and about twenty achievements.
+- Journeys also keep `finished` and the achievements earned, by name, so an
+  achievement a version does not know is dropped rather than misread.
+
+## Journal and achievements
+
+Select opens the journal, a spread of the storybook. The left page shows the
+three planets in miniature with a line about each as the prince left it (or
+that something is still waiting, or that it is not visited yet); the right
+page lists the twelve achievements, earned ones by name in gold and the rest
+as hints. Statistics stay in the pause menu.
+
+| Achievement | Earned by |
+| --- | --- |
+| The first sprout | Pulling up a baobab sprout |
+| Keeper of the rose | Finishing B612's task |
+| The night watch | Finishing the lamplighter's task |
+| Tamed | Winning the fox's trust |
+| The aviator's parts | Finding all four aeroplane parts |
+| Home | The ending |
+| Forty-four sunsets | Watching 44 sunsets, as the prince once did in a day |
+| Pockets of stardust | Carrying 50 stardust |
+| Friend of the birds | Flying 10 times |
+| Careful hands | Seeing to 20 troubles |
+| A long walk | Walking 1,000 metres |
+| Light on his feet | Jumping 100 times |
+
+An achievement is shown once, as it is earned, and kept whatever happens
+after (spending stardust does not take it back).
 
 ## Troubles and stardust
 
