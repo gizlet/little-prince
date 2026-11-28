@@ -395,7 +395,7 @@ fn setup_capture(app: &mut App, c: &input::Controls) {
                 app.menu = Some(menu::Menu::open(menu::Page::Journal, 0));
             } else {
                 app.journey.done = [true; 3];
-                app.ending = Some(0.0);
+                app.begin_ending();
                 step(app, at);
             }
         }

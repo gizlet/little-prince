@@ -176,6 +176,8 @@ pub struct App {
     pub cast: Cast,
     /// Seconds into the ending, while it plays.
     pub ending: Option<f32>,
+    /// The time of day the ending turns the planet to: its next sunset.
+    ending_to: f32,
     /// Achievements just earned, shown one after another, and seconds the
     /// first has shown.
     pub toasts: Vec<usize>,
@@ -283,6 +285,7 @@ impl App {
             stun: 0.0,
             cast,
             ending: None,
+            ending_to: 0.0,
             toasts: Vec::new(),
             toast_t: 0.0,
             free_t: 99.0,
@@ -469,10 +472,7 @@ impl App {
             self.dialog = None;
             match finish {
                 Finish::Complete(p) => self.complete(p),
-                Finish::Ending => {
-                    self.ending = Some(0.0);
-                    self.snd.play(Sfx::Chime(3), 0.8, 0.45);
-                }
+                Finish::Ending => self.begin_ending(),
                 Finish::Nothing => {}
             }
         }
@@ -981,14 +981,23 @@ impl App {
     /// circles the prince and the rose and the closing lines show; then the
     /// story is over and every route stays open. A after a few seconds ends
     /// it sooner.
+    /// Starts the ending, finding the sunset it turns the planet to.
+    pub fn begin_ending(&mut self) {
+        self.ending = Some(0.0);
+        self.ending_to = self.world().next_sunset(self.player.n, self.t);
+        self.snd.play(Sfx::Chime(3), 0.8, 0.45);
+    }
+
     fn update_ending(&mut self, dt: f32, skip: bool) {
         let Some(e) = self.ending.as_mut() else { return };
         *e += dt;
         let e = *e;
         let n = self.player.n;
-        // Fast until the sun touches the horizon, then at its own pace.
-        if e < 16.0 && n.dot(self.world().sun(self.t)) > 0.02 {
-            self.t += dt * 14.0;
+        // Through the rest of the day, or the night and the next day, to
+        // arrive at the sunset twelve seconds in; then at its own pace.
+        let left = self.ending_to - self.t;
+        if left > 0.0 {
+            self.t += if e < 12.0 { left * dt / (12.0 - e) } else { left };
         }
         self.cam_fwd = self.cam_fwd.rotate(n, dt * 0.18).flatten(n).norm();
         if e >= ENDING || (skip && e > 4.0) {
