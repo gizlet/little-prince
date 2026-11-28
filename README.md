@@ -16,6 +16,10 @@ A 3D game for [Gizlet OS](https://github.com/gizlet/os) handhelds such as the R3
 | --- | --- | --- |
 | ![Troubles on B612](docs/screenshots/troubles.png) | ![The night watch](docs/screenshots/watch.png) | ![A sandstorm](docs/screenshots/storm.png) |
 
+| The journal | The ending |
+| --- | --- |
+| ![The journal](docs/screenshots/journal-book.png) | ![The ending](docs/screenshots/ending.png) |
+
 ## Credits
 
 - **The story** is Antoine de Saint-Exupéry's *Le Petit Prince* (1943). The planets follow the book: B612 with its volcanoes, rose and baobab sprouts, the lamplighter's planet, and the desert where the fox is tamed. The book is in the public domain in most countries but not everywhere, and "Le Petit Prince" is a registered trademark. Keep this demo non-commercial.
@@ -52,13 +56,15 @@ cargo run --release
 | I | X | Open the book at the star chart |
 | Q / E, R / F | Right stick | Turn the camera left and right, up and down |
 | U | Y | Effects: high, mid, low |
-| Tab | Select | Statistics |
+| Tab | Select | Journal: the planets as you left them, and achievements |
 | Esc or P | Start | Pause menu: resume, settings, statistics, save and return to the title; settings on the title |
 | Backspace or J | B | Back, in menus |
 
 The title, the journeys and the star map are pages of one storybook floating in the night. On the title its cover turns slowly; A opens it at the three journeys, each with its own bookmark: choose one to continue it, or an empty one to start; X twice moves the chosen journey aside (to `slotN.txt.old`). The game saves on arriving at a planet, on scoring, when the pause menu opens, on returning to the title and on quitting, and every minute. The settings hold the language, effects level, performance panel, volume and inverted camera, for all journeys.
 
 Each planet has someone to talk to and a task: on B612 the rose asks for ten baobab sprouts to be pulled up, both volcanoes to be swept (stand beside one for a moment) and the three caterpillars crawling towards her to be jumped on, which turns them into butterflies; the lamplighter wants company through three sunsets and six snuffer moths shooed from his lamp (jump beside one), and in the desert the fox is tamed by standing still while it comes closer, then leads the way to the buried aeroplane parts; all four are to be picked up between sandstorms. Walk up to them and press A; A moves the conversation on and B leaves it.
+
+Select opens the journal, a page of the storybook: the three planets as the prince left them, and twelve achievements, earned in gold and the rest as hints of how to earn them. With all three tasks done, the rose on B612 has something to say: the planet turns to sunset, a few closing lines follow, and the story is over. The game then goes on in free play, every route open; statistics stay in the pause menu.
 
 Nothing in the game hurts the prince. Troubles left alone grow: sprouts left standing seed new ones, and an unswept volcano throws cinders, whose landing spots show as dark shadows first. Walking into a caterpillar or a cinder knocks him back and spills up to three of the stardust he carries, which glitters on the ground for a few seconds to be gathered again. Stardust floats over every planet, comes back a while after it is gathered, and is set free by every trouble seen to; the HUD shows how much he carries. X opens the book at the star chart: the planets drawn in colour once visited and as blue ink sketches before, joined by the birds' dotted routes. Left and right choose a planet and A turns to its chapter, with its story, its task and A to fly there; planets already visited can be flown to at any time, and the route to the next planet opens when the current planet's task is done. B turns back and X closes the book. Pages turn with a curling leaf, and cut straight over at effects level low.
 
@@ -80,7 +86,7 @@ Left alone on the title for 12 seconds, it plays by itself (autoplay) and moves 
 | `LITTLEPRINCE_SKIP=hero,heroink,skin,world,grass,props,flowers,troubles,backdrop,sky,alpha,glass,glow,bloom` | Leave parts out, for measuring their cost |
 | `LITTLEPRINCE_FPS=60` | Frame rate cap; `0` leaves the pace to the display |
 | `LITTLEPRINCE_SECONDS=80` | Quit after that many seconds, for scripted runs |
-| `LITTLEPRINCE_CAPTURE=FILE.png` | Render one frame to a PNG and exit, saving nothing; `LITTLEPRINCE_SCENE` is `title` (or `cover`), `b612`, `lamp`, `desert`, `fly`, `journeys`, `pause`, `settings`, `statistics`, `starmap`, `chapter`, `turn` (a page halfway over), `dialog`, `troubles` (a volcano throwing cinders, with stardust in hand), `watch` (moths at the lamp), `storm` (a sandstorm), `keeper` and `foxclose` (close-ups), `model` or `icon`, and `LITTLEPRINCE_AT` the seconds of autoplay before it |
+| `LITTLEPRINCE_CAPTURE=FILE.png` | Render one frame to a PNG and exit, saving nothing; `LITTLEPRINCE_SCENE` is `title` (or `cover`), `b612`, `lamp`, `desert`, `fly`, `journeys`, `pause`, `settings`, `statistics`, `starmap`, `chapter`, `turn` (a page halfway over), `dialog`, `journal`, `ending`, `troubles` (a volcano throwing cinders, with stardust in hand), `watch` (moths at the lamp), `storm` (a sandstorm), `keeper` and `foxclose` (close-ups), `model` or `icon`, and `LITTLEPRINCE_AT` the seconds of autoplay before it |
 | `LITTLEPRINCE_SCRIPT=FILE` | Replay the button presses in FILE at 60 steps a second, checking the game's state as it goes; exits with status 1 if a check fails. `assist SECS` lets the game play the planet's task for that long (format in `src/script.rs`) |
 
 ```sh
@@ -88,7 +94,7 @@ cargo test
 scripts/play-tests.sh
 ```
 
-`scripts/play-tests.sh` plays the button replays in `tests/scripts` on the desktop build, each group of them on a fresh save folder: starting a journey, coming back to it, deleting it, and finishing the three planets' tasks in turn.
+`scripts/play-tests.sh` plays the button replays in `tests/scripts` on the desktop build, each group of them on a fresh save folder: starting a journey, coming back to it, deleting it, finishing the three planets' tasks in turn, and the whole story on one journey, from a new journey through the ending to free play (about six and a half minutes).
 
 ## Play on Windows
 
@@ -152,6 +158,7 @@ Do not pin the GPU clock by hand: setting `min_freq` of `/sys/class/devfreq/ff40
 | `src/sound.rs` | Synthesized sound effects |
 | `src/hud.rs`, `src/text.rs` | The HUD and menus, strings in Chinese and English, font atlases |
 | `src/dialog.rs` | Conversations and their lines |
+| `src/achieve.rs` | The twelve achievements and when they are earned |
 | `src/trouble.rs` | Stardust, caterpillars, cinders, snuffer moths, dust devils and the aeroplane parts |
 | `src/book.rs` | The storybook: its cover, the journeys, the star chart and the chapters, paper made at start-up, page turns and the planets in miniature |
 | `src/save.rs` | Journeys and settings on disk |

@@ -15,6 +15,8 @@ pub enum Page {
     /// A planet's chapter, the row being the planet: its story, its task
     /// and the way there.
     Chapter,
+    /// The journal: the planets as they were left, and the achievements.
+    Journal,
 }
 
 /// The pause menu's rows.
@@ -97,7 +99,7 @@ impl Menu {
             Page::Journeys => crate::save::SLOTS,
             Page::Pause => PAUSE.len(),
             Page::Settings => SETTINGS.len(),
-            Page::Statistics => 0,
+            Page::Statistics | Page::Journal => 0,
             Page::StarMap | Page::Chapter => 3,
         }
     }
@@ -176,7 +178,7 @@ impl Menu {
                 self.stack.clear();
                 Action::Close
             }
-            Page::Statistics if k.a => self.back(),
+            Page::Statistics | Page::Journal if k.a => self.back(),
             _ => Action::None,
         }
     }

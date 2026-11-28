@@ -207,6 +207,25 @@ fn spot_at(r: f32, f: f32, s: f32) -> V3 {
 
 /// Picks `count` directions at least `sep` radians from each other and from
 /// `taken`.
+/// The first time from `t` on, within a `period` and a little more, at
+/// which `height` (the sun's height over a spot) sinks through the horizon:
+/// the next sunset, whether `t` falls by day or by night.
+fn next_setting(height: impl Fn(f32) -> f32, t: f32, period: f32) -> f32 {
+    let step = period / 960.0;
+    let mut before = height(t);
+    let mut k = 1;
+    while k as f32 * step <= period * 1.05 {
+        let at = t + k as f32 * step;
+        let now = height(at);
+        if before > 0.02 && now <= 0.02 {
+            return at;
+        }
+        before = now;
+        k += 1;
+    }
+    t
+}
+
 /// Which of `active` volcanoes are swept: those whose bit is set in
 /// `swept`, or for saves that only kept a count, the first `count`.
 fn mark_swept(active: usize, count: usize, swept: Option<u8>) -> Vec<bool> {
@@ -1212,6 +1231,11 @@ impl World {
     }
 
     /// The sky over `n` at time `t`: day, sunset or night by the sun's height there.
+    /// When the sun next sets over `n`, from time `t`.
+    pub fn next_sunset(&self, n: V3, t: f32) -> f32 {
+        next_setting(|t| n.dot(self.sun(t)), t, self.period)
+    }
+
     pub fn wind(&self) -> V3 {
         self.pal.wind
     }
@@ -2678,6 +2702,15 @@ fn draw_fox(gl: &Gl, kit: &Kit, f: &Fox, r: f32, t: f32) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_next_sunset_comes_by_day_and_by_night() {
+        let height = |t: f32| (t * TAU / 100.0).sin();
+        let day = next_setting(height, 10.0, 100.0);
+        assert!((day - 50.0).abs() < 0.5, "by day, the coming dusk: {day}");
+        let night = next_setting(height, 60.0, 100.0);
+        assert!((night - 150.0).abs() < 0.5, "by night, the next day's dusk: {night}");
+    }
+
     #[test]
     fn the_volcano_swept_is_the_one_restored() {
         assert_eq!(mark_swept(2, 1, Some(0b10)), [false, true], "the second, swept first, stays swept");
