@@ -1,5 +1,5 @@
 id = "io.gizlet.littleprince"
-version = "0.3.0"
+version = "0.3.1"
 name = "The Little Prince"
 category = "game"
 description = "Walk three tiny planets, watch their suns set, and follow a flock of migrating birds to your next stop. A short 3D exploration demo for Gizlet handhelds."
