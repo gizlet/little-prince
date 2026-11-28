@@ -1422,6 +1422,15 @@ impl World {
         self.caterpillars.iter().filter(|c| c.crawling()).any(|c| (c.n * ground_r(kind, c.n) - feet).len() < r)
     }
 
+    /// Whether a snuffer moth flying at the lamp is within `r` of `feet`
+    /// along the ground: then A jumps to shoo it rather than talking to the
+    /// lamplighter beside the lamp.
+    pub fn moth_near(&self, feet: V3, r: f32) -> bool {
+        let up = feet.norm();
+        let kind = self.kind;
+        self.moths.iter().filter(|m| m.coming()).any(|m| (m.n * ground_r(kind, m.n) - feet).flatten(up).len() < r)
+    }
+
     /// Caterpillars out and crawling.
     pub fn crawling(&self) -> usize {
         self.caterpillars.iter().filter(|c| c.crawling()).count()

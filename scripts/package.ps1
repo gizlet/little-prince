@@ -19,11 +19,13 @@ cargo build --release --locked --target $target
 if ($LASTEXITCODE -ne 0) { throw "cargo build exited with $LASTEXITCODE" }
 
 if (Test-Path $Out) { Remove-Item -Recurse -Force $Out }
-New-Item -ItemType Directory -Force "$Out/bin", "$Out/licenses", "$Out/assets/hero" | Out-Null
+New-Item -ItemType Directory -Force "$Out/bin", "$Out/licenses", "$Out/assets/hero", "$Out/assets/npc" | Out-Null
 Copy-Item "target/$target/release/littleprince.exe" "$Out/bin/littleprince.exe"
 Copy-Item LICENSE "$Out/licenses/littleprince-MIT.txt"
 Copy-Item assets/hero/little-prince.glb "$Out/assets/hero/"
 Copy-Item assets/hero/LICENSE.txt "$Out/licenses/little-prince-model-CC0.txt"
+Copy-Item assets/npc/lamplighter.glb, assets/npc/fox.glb "$Out/assets/npc/"
+Copy-Item assets/npc/LICENSE.txt "$Out/licenses/lamplighter-and-fox-models-CC0.txt"
 Copy-Item assets/fonts/Inter-OFL.txt "$Out/licenses/inter-OFL.txt"
 Copy-Item assets/fonts/SpaceGrotesk-OFL.txt "$Out/licenses/space-grotesk-OFL.txt"
 Copy-Item assets/fonts/DroidSansFallback-LICENSE.txt "$Out/licenses/droid-sans-fallback-Apache-2.0.txt"

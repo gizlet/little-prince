@@ -177,6 +177,8 @@ pub struct App {
 const TALK: f32 = 1.2;
 /// Within this of a crawling caterpillar A jumps, even beside the rose.
 const STOMP: f32 = 0.9;
+/// Within this of a snuffer moth A jumps, even beside the lamplighter.
+const SHOO: f32 = 1.2;
 
 /// Seconds between saves while playing, besides those on arriving, scoring,
 /// opening the menu and quitting.
@@ -413,7 +415,10 @@ impl App {
     /// caterpillar close enough that A is wanted for landing on it.
     pub fn near_speaker(&self) -> bool {
         let feet = self.player.feet();
-        self.world().speaker().is_some_and(|s| (s - feet).len() < TALK) && !self.world().caterpillar_near(feet, STOMP)
+        let w = self.world();
+        w.speaker().is_some_and(|s| (s - feet).len() < TALK)
+            && !w.caterpillar_near(feet, STOMP)
+            && !w.moth_near(feet, SHOO)
     }
 
     fn talk(&mut self) {
